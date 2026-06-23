@@ -1,0 +1,81 @@
+module main
+
+import "std/tensor"
+import "dataset"
+import "neural_net"
+
+fn main() -> int {
+    print("Loading dataset...")
+    
+    data, err := dataset.LoadIrisDataset("data/iris.csv")
+    errMsg := err.message
+    if errMsg != "" {
+        print("Failed to load dataset")
+        return 1
+    }
+    
+    numSamples := data.features.Shape()[0]
+    numClasses := data.numClasses
+    print("Dataset loaded: {numSamples} samples")
+    print("Classes: {numClasses}")
+    
+    print("\nCreating neural network...")
+    nn := neural_net.NewNeuralNetwork(4, 16, 8, 3, 0.001)
+    print("Network architecture: 4 -> 16 -> 8 -> 3")
+    epochs := 10000
+    print("Training model {epochs} epochs...\n")
+    neural_net.Train(&nn, data.features, data.labels, epochs)
+    
+    print("\nEvaluating model...")
+    accuracy := neural_net.Accuracy(nn, data.features, data.labels)
+    accPercent := accuracy * 100.0
+    print("Training accuracy: {accPercent}%")
+    
+    print("\nSample predictions:")
+    sample := Zeros([5, 4])
+    i := 0
+    for i < 5 {
+        j := 0
+        for j < 4 {
+            sample.Set([i, j], data.features.Get([i, j]))
+            j = j + 1
+        }
+        i = i + 1
+    }
+    
+    predictions := neural_net.Predict(nn, sample)
+    
+    i = 0
+    for i < 5 {
+        maxPred := predictions.Get([i, 0])
+        predClass := 0
+        j := 1
+        for j < 3 {
+            val := predictions.Get([i, j])
+            if val > maxPred {
+                maxPred = val
+                predClass = j
+            }
+            j = j + 1
+        }
+        
+        maxTrue := data.labels.Get([i, 0])
+        trueClass := 0
+        k := 1
+        for k < 3 {
+            val := data.labels.Get([i, k])
+            if val > maxTrue {
+                maxTrue = val
+                trueClass = k
+            }
+            k = k + 1
+        }
+        
+        print("Sample {i}: Predicted class {predClass}, True class {trueClass} \n")
+        i = i + 1
+    }
+    
+    print("\nModel training complete!")
+    
+    return 0
+}

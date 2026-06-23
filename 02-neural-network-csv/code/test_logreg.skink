@@ -1,0 +1,82 @@
+module main
+
+import "std/tensor"
+import "dataset"
+
+fn sumRows(t: Tensor) -> Tensor {
+    rows := t.Shape()[0]
+    cols := t.Shape()[1]
+    result := Zeros([1, cols])
+    j := 0
+    for j < cols {
+        s := 0.0
+        i := 0
+        for i < rows {
+            s = s + t.Get([i, j])
+            i = i + 1
+        }
+        result.Set([0, j], s)
+        j = j + 1
+    }
+    return result
+}
+
+fn main() -> int {
+    print("Loading data...")
+    data, err := dataset.LoadIrisDataset("data/iris.csv")
+    if err.message != "" {
+        print("Failed")
+        return 1
+    }
+    
+    x := data.features
+    y := data.labels
+    
+    // Simple logistic regression: W[4,3], b[1,3]
+    W := Random([4, 3])
+    b := Zeros([1, 3])
+    lr := 0.1
+    
+    epoch := 0
+    for epoch < 100 {
+        logits := Add(MatMul(x, W), b)
+        probs := Softmax(logits)
+        
+        loss := 0.0
+        i := 0
+        for i < 15 {
+            target := 0
+            if y.data[i * 3 + 1] > 0.5 { target = 1 }
+            if y.data[i * 3 + 2] > 0.5 { target = 2 }
+            p := probs.data[i * 3 + target]
+            if p < 0.000001 { p = 0.000001 }
+            loss = loss - math.Log(p)
+            i = i + 1
+        }
+        loss = loss / 15.0
+        
+        if epoch % 20 == 0 {
+            print("Ep{epoch}: {loss}")
+        }
+        
+        dz := Sub(probs, y)
+        dW := MatMul(Transpose(x), dz)
+        db := sumRows(dz)
+        
+        i = 0
+        for i < len(W.data) {
+            W.data[i] = W.data[i] - dW.data[i] * lr
+            i = i + 1
+        }
+        i = 0
+        for i < len(b.data) {
+            b.data[i] = b.data[i] - db.data[i] * lr
+            i = i + 1
+        }
+        
+        epoch = epoch + 1
+    }
+    
+    print("Done!")
+    return 0
+}

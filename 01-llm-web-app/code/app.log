@@ -1,0 +1,3 @@
+GET /health
+POST /api/chat
+GET /static/index.html

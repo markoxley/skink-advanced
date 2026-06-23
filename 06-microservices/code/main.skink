@@ -1,0 +1,97 @@
+module main
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+import "std/fmt"
+
+struct User {
+    id: string
+    name: string
+    email: string
+}
+
+struct Product {
+    id: string
+    name: string
+    price: float
+    stock: int
+}
+
+struct Order {
+    id: string
+    userId: string
+    productId: string
+    quantity: int
+    total: float
+}
+
+fn createUser(id: string, name: string, email: string) -> User {
+    return User{id: id, name: name, email: email}
+}
+
+fn createProduct(id: string, name: string, price: float, stock: int) -> Product {
+    return Product{id: id, name: name, price: price, stock: stock}
+}
+
+fn createOrder(id: string, userId: string, productId: string, quantity: int, price: float) -> Order {
+    return Order{id: id, userId: userId, productId: productId, quantity: quantity, total: price * float(quantity)}
+}
+
+fn main() -> int {
+    print("Starting Microservices System...")
+    
+    // Initialize services
+    users := []User{
+        createUser("u1", "Alice", "alice@example.com"),
+        createUser("u2", "Bob", "bob@example.com")
+    }
+    
+    products := []Product{
+        createProduct("p1", "Laptop", 999.99, 10),
+        createProduct("p2", "Mouse", 29.99, 50)
+    }
+    
+    orders := []Order{
+        createOrder("o1", "u1", "p1", 1, 999.99),
+        createOrder("o2", "u2", "p2", 2, 29.99)
+    }
+    
+    print("Services initialized")
+    numUsers := len(users)
+    numProducts := len(products)
+    numOrders := len(orders)
+    print("Users: {numUsers}")
+    print("Products: {numProducts}")
+    print("Orders: {numOrders}")
+    
+    // Display orders
+    print("\nOrders:")
+    i := 0
+    for i < len(orders) {
+        o := orders[i]
+        orderId := o.id
+        userId := o.userId
+        productId := o.productId
+        qtyStr := fmt.Itoa(o.quantity)
+        print("Order {orderId}: User={userId}, Product={productId}, Qty={qtyStr}")
+        i = i + 1
+    }
+    
+    // Save to file
+    report := "Microservices Report\n"
+    userStr := fmt.Itoa(numUsers)
+    productStr := fmt.Itoa(numProducts)
+    orderStr := fmt.Itoa(numOrders)
+    report = str.Concat(report, str.Concat("Users: ", str.Concat(userStr, "\n")))
+    report = str.Concat(report, str.Concat("Products: ", str.Concat(productStr, "\n")))
+    report = str.Concat(report, str.Concat("Orders: ", str.Concat(orderStr, "\n")))
+    
+    err := fs.WriteAll("microservices_report.txt", report)
+    if err.message == "" {
+        print("\nReport saved")
+    }
+    
+    print("\nSystem running")
+    return 0
+}

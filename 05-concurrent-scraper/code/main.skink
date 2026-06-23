@@ -1,0 +1,91 @@
+module main
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+import "std/fmt"
+
+struct Task {
+    url: string
+    status: int
+}
+
+struct Result {
+    url: string
+    status: int
+    title: string
+}
+
+fn processURL(url: string) -> Result {
+    // Simulate fetching
+    status := 200
+    if str.Contains(url, "error") {
+        status = 404
+    }
+    return Result{url: url, status: status, title: "Example Page"}
+}
+
+fn saveResults(results: []Result, path: string) -> Error {
+    csv := "URL,Status,Title\n"
+    i := 0
+    for i < len(results) {
+        r := results[i]
+        statusStr := fmt.Itoa(r.status)
+        line := str.Concat(r.url, ",")
+        line = str.Concat(line, str.Concat(statusStr, ","))
+        line = str.Concat(line, str.Concat(r.title, "\n"))
+        csv = str.Concat(csv, line)
+        i = i + 1
+    }
+    return fs.WriteAll(path, csv)
+}
+
+fn main() -> int {
+    print("Starting Concurrent Web Scraper...")
+    
+    urls := []string{
+        "http://skink-lang.uk"
+    }
+    
+    numURLs := len(urls)
+    numWorkers := 3
+    print("Loaded {numURLs} URLs to scrape")
+    print("Using {numWorkers} workers")
+    
+    results := []Result{}
+    i := 0
+    for i < numURLs {
+        url := urls[i]
+        print("Fetching: {url}")
+        result := processURL(url)
+        results = append(results, result)
+        statusStr := fmt.Itoa(result.status)
+        print("Fetched: {statusStr}")
+        i = i + 1
+    }
+    
+    print("\nSaving results...")
+    outputPath := "output/results.csv"
+    err := saveResults(results, outputPath)
+    if err.message == "" {
+        print("Results saved to {outputPath}")
+    }
+    
+    print("\n=== Scraping Summary ===")
+    total := len(results)
+    success := 0
+    j := 0
+    for j < total {
+        if results[j].status == 200 {
+            success = success + 1
+        }
+        j = j + 1
+    }
+    totalStr := fmt.Itoa(total)
+    successStr := fmt.Itoa(success)
+    print("Total URLs: {totalStr}")
+    print("Successful: {successStr}")
+    
+    print("\nScraping complete!")
+    return 0
+}

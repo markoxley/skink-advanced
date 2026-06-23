@@ -1,0 +1,51 @@
+import "std/fs"
+import "std/str"
+import "worker"
+
+fn SaveCSV(results: []worker.Result, path: string) -> error {
+    file, err := fs.Create(path)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    // Write header
+    header := "URL,Status,Title,Error,Duration(ms)\n"
+    file.WriteString(header)
+    
+    // Write rows
+    for i := 0; i < len(results); i = i + 1 {
+        r := results[i]
+        line := "{r.url},{r.status},{r.title},{r.error},{r.duration}\n"
+        file.WriteString(line)
+    }
+    
+    return nil
+}
+
+fn SaveJSON(results: []worker.Result, path: string) -> error {
+    file, err := fs.Create(path)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    // Simple JSON output
+    json := "[\n"
+    for i := 0; i < len(results); i = i + 1 {
+        if i > 0 {
+            json += ",\n"
+        }
+        json += "  {\"url\": \"result\"}\n"
+    }
+    json += "]\n"
+    
+    file.WriteString(json)
+    return nil
+}
+
+fn PrintSummary(results: []worker.Result) {
+    total := len(results)
+    print("\n=== Scraping Summary ===")
+    print("Total URLs: {total}")
+}

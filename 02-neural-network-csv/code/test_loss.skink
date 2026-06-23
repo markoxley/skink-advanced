@@ -1,0 +1,43 @@
+module main
+
+import "std/tensor"
+import "dataset"
+
+fn main() -> int {
+    print("Loading data...")
+    data, err := dataset.LoadIrisDataset("data/iris.csv")
+    if err.message != "" {
+        print("Failed")
+        return 1
+    }
+    
+    print("Computing predictions...")
+    predictions := Softmax(data.features)
+    
+    print("Computing targets...")
+    batchSize := data.features.Shape()[0]
+    targets := []int{}
+    i := 0
+    for i < batchSize {
+        maxVal := data.labels.Get([i, 0])
+        maxIdx := 0
+        j := 1
+        for j < 3 {
+            val := data.labels.Get([i, j])
+            if val > maxVal {
+                maxVal = val
+                maxIdx = j
+            }
+            j = j + 1
+        }
+        targets = append(targets, maxIdx)
+        i = i + 1
+    }
+    
+    print("Computing loss...")
+    loss := CrossEntropyLoss(predictions, targets)
+    print("Loss = {loss}")
+    
+    print("Done!")
+    return 0
+}

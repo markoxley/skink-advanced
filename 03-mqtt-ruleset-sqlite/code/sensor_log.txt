@@ -1,0 +1,2 @@
+ALERT: high_temp triggered for sensor_2
+ALERT: high_humidity triggered for sensor_3

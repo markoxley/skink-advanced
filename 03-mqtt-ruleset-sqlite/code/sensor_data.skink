@@ -1,0 +1,25 @@
+struct SensorReading {
+    deviceId: string
+    sensorType: string
+    value: float
+    timestamp: int
+    unit: string
+}
+
+struct Alert {
+    ruleName: string
+    message: string
+    severity: string
+    timestamp: int
+    sensorData: SensorReading
+}
+
+fn NewSensorReading(deviceId: string, sensorType: string, value: float, unit: string) -> SensorReading {
+    return SensorReading{
+        deviceId: deviceId,
+        sensorType: sensorType,
+        value: value,
+        timestamp: time.Now().Unix(),
+        unit: unit
+    }
+}

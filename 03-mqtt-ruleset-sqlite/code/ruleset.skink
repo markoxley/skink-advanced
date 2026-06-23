@@ -1,0 +1,29 @@
+import "std/rules"
+import "sensor_data"
+import "db_logger"
+
+ruleset SensorMonitoring {
+    // High temperature alert
+    rule high_temp when temp > 80.0 {
+        action: fn() {
+            print("ALERT: High temperature detected")
+        }
+        priority: 1
+    }
+    
+    // Low temperature alert
+    rule low_temp when temp < 10.0 {
+        action: fn() {
+            print("WARNING: Low temperature detected")
+        }
+        priority: 2
+    }
+    
+    // Normal operation log
+    rule normal_operation when true {
+        action: fn() {
+            print("Normal operation")
+        }
+        priority: 10
+    }
+}

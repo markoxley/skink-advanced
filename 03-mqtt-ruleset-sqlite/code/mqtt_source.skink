@@ -1,0 +1,81 @@
+import "std/mqtt"
+import "std/rules"
+import "sensor_data"
+import "db_logger"
+
+template MQTTSource for rules.RuleSource {
+    client: mqtt.Client
+    topic: string
+    currentReading: SensorReading
+    logger: DBLogger
+    mutex: sync.Mutex
+    
+    fn name() -> string {
+        return "mqtt_sensor_source"
+    }
+    
+    fn start() {
+        // Subscribe to MQTT topic
+        client.Subscribe(self.topic, 0, fn(topic: string, payload: []byte) {
+            // Parse sensor data from MQTT message
+            // Expected format: JSON or simple "device:sensor:value:unit"
+            data := string(payload)
+            parts := str.Split(data, ":")
+            
+            if len(parts) >= 4 {
+                deviceId := parts[0]
+                sensorType := parts[1]
+                value := str.ParseFloat(parts[2])
+                unit := parts[3]
+                
+                reading := NewSensorReading(deviceId, sensorType, value, unit)
+                
+                self.mutex.Lock()
+                self.currentReading = reading
+                self.mutex.Unlock()
+                
+                // Log to database
+                self.logger.LogReading(reading)
+            }
+        })
+        
+        // Start MQTT client loop
+        client.Start()
+    }
+    
+    fn stop() {
+        self.client.Unsubscribe(self.topic)
+        self.client.Stop()
+    }
+    
+    fn triggered() -> bool {
+        // Check if current reading meets any rule conditions
+        // This is called by the ruleset engine
+        return true // Always trigger to evaluate all rules
+    }
+    
+    fn action() {
+        // Default action - can be overridden by specific rules
+        print("MQTT message received: {self.currentReading.deviceId} - {self.currentReading.value}")
+    }
+    
+    fn priority() -> int {
+        return 10
+    }
+    
+    fn GetReading() -> SensorReading {
+        self.mutex.Lock()
+        defer self.mutex.Unlock()
+        return self.currentReading
+    }
+}
+
+fn NewMQTTSource(broker: string, topic: string, logger: DBLogger) -> MQTTSource {
+    client := mqtt.NewClient(broker, "skink_monitor")
+    return MQTTSource{
+        client: client,
+        topic: topic,
+        logger: logger,
+        mutex: sync.Mutex{}
+    }
+}

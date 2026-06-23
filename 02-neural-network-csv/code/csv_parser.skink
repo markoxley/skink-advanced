@@ -1,0 +1,70 @@
+module csv_parser
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+
+pub struct CSVRow {
+    fields: []string
+}
+
+pub struct CSVParser {
+    delimiter: string
+}
+
+pub fn NewCSVParser(delimiter: string) -> CSVParser {
+    return CSVParser{delimiter: delimiter}
+}
+
+pub fn ParseFile(p: CSVParser, path: string) -> ([]CSVRow, Error) {
+    content, err := fs.ReadAll(path)
+    if err.message != "" {
+        return []CSVRow{}, err
+    }
+    
+    lines := str.Split(content, "\n")
+    rows := []CSVRow{}
+    
+    i := 1
+    for i < len(lines) {
+        line := str.Trim(lines[i])
+        if line != "" {
+            fields := str.Split(line, p.delimiter)
+            rows = append(rows, CSVRow{fields: fields})
+        }
+        i = i + 1
+    }
+    
+    return rows, New("")
+}
+
+pub fn ParseFloatField(row: CSVRow, index: int) -> float {
+    s := row.fields[index]
+    result := 0.0
+    sign := 1.0
+    decimal := false
+    divisor := 10.0
+    i := 0
+    for i < str.Len(s) {
+        c := s[i]
+        if c == 45 && i == 0 {
+            sign = -1.0
+        } else if c == 46 {
+            decimal = true
+        } else if c >= 48 && c <= 57 {
+            digit := float(c - 48)
+            if decimal {
+                result = result + digit / divisor
+                divisor = divisor * 10.0
+            } else {
+                result = result * 10.0 + digit
+            }
+        }
+        i = i + 1
+    }
+    return result * sign
+}
+
+pub fn ParseStringField(row: CSVRow, index: int) -> string {
+    return row.fields[index]
+}

@@ -1,0 +1,44 @@
+module main
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+import "logger"
+
+fn main() -> int {
+    print("Starting LLM Web Application...")
+    
+    // Initialize logger
+    log, err := logger.NewLogger("app.log")
+    errMsg := err.message
+    if errMsg != "" {
+        print("Failed to create logger: {errMsg}")
+        return 1
+    }
+    
+    print("Server would start on :8080")
+    print("Static files served from /static")
+    print("Chat endpoint: /api/chat")
+    print("Health check: /health")
+    
+    // Simulate request logging
+    logger.Log(log, "GET /health")
+    logger.Log(log, "POST /api/chat")
+    logger.Log(log, "GET /static/index.html")
+    
+    // Read back the log file
+    content, readErr := fs.ReadAll("app.log")
+    readMsg := readErr.message
+    if readMsg == "" {
+        lines := str.Split(content, "\n")
+        numLines := len(lines)
+        print("\nLog file contains {numLines} lines")
+        print("Log contents:")
+        print(content)
+    }
+    
+    logger.Close(log)
+    
+    print("\nApplication shutdown complete")
+    return 0
+}

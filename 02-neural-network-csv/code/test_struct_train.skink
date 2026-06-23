@@ -1,0 +1,156 @@
+module main
+
+import "std/tensor"
+import "dataset"
+
+struct NN {
+    layer1: LinearLayer
+    layer2: LinearLayer
+    layer3: LinearLayer
+    lr: float
+}
+
+fn NewNN() -> NN {
+    return NN{
+        layer1: NewLinear(4, 16),
+        layer2: NewLinear(16, 8),
+        layer3: NewLinear(8, 3),
+        lr: 0.01
+    }
+}
+
+fn reluDeriv(t: Tensor) -> Tensor {
+    result := Zeros(t.shape)
+    i := 0
+    for i < len(t.data) {
+        if t.data[i] > 0.0 {
+            result.data[i] = 1.0
+        }
+        i = i + 1
+    }
+    return result
+}
+
+fn sumRows(t: Tensor) -> Tensor {
+    rows := t.Shape()[0]
+    cols := t.Shape()[1]
+    result := Zeros([1, cols])
+    j := 0
+    for j < cols {
+        s := 0.0
+        i := 0
+        for i < rows {
+            s = s + t.Get([i, j])
+            i = i + 1
+        }
+        result.Set([0, j], s)
+        j = j + 1
+    }
+    return result
+}
+
+fn Train(nn: *NN, x: Tensor, y: Tensor) {
+    z1 := Add(MatMul(x, nn.layer1.weights), nn.layer1.bias)
+    a1 := ReLU(z1)
+    z2 := Add(MatMul(a1, nn.layer2.weights), nn.layer2.bias)
+    a2 := ReLU(z2)
+    z3 := Add(MatMul(a2, nn.layer3.weights), nn.layer3.bias)
+    a3 := Softmax(z3)
+    
+    batchSize := x.Shape()[0]
+    targets := []int{}
+    i := 0
+    for i < batchSize {
+        maxVal := y.Get([i, 0])
+        maxIdx := 0
+        j := 1
+        for j < 3 {
+            val := y.Get([i, j])
+            if val > maxVal {
+                maxVal = val
+                maxIdx = j
+            }
+            j = j + 1
+        }
+        targets = append(targets, maxIdx)
+        i = i + 1
+    }
+    
+    loss := CrossEntropyLoss(a3, targets)
+    lossVal := loss
+    print("Loss = {lossVal}")
+    
+    dz3 := Sub(a3, y)
+    dW3 := MatMul(Transpose(a2), dz3)
+    db3 := sumRows(dz3)
+    da2 := MatMul(dz3, Transpose(nn.layer3.weights))
+    dz2 := Mul(da2, reluDeriv(z2))
+    dW2 := MatMul(Transpose(a1), dz2)
+    db2 := sumRows(dz2)
+    da1 := MatMul(dz2, Transpose(nn.layer2.weights))
+    dz1 := Mul(da1, reluDeriv(z1))
+    // dW1 unused
+    db1 := sumRows(dz1)
+    
+    print("update W3")
+    nn.layer3.weights = Sub(nn.layer3.weights, Scale(dW3, nn.lr))
+    print("update b3")
+    nn.layer3.bias = Sub(nn.layer3.bias, Scale(db3, nn.lr))
+    print("update W2")
+    nn.layer2.weights = Sub(nn.layer2.weights, Scale(dW2, nn.lr))
+    print("check l1 bias after W2")
+    bshape := nn.layer1.bias.shape
+    blen := len(nn.layer1.bias.data)
+    sr := bshape[0]
+    sc := bshape[1]
+    print("bias1 shape: {sr}x{sc}, data len: {blen}")
+    print("update b2")
+    nn.layer2.bias = Sub(nn.layer2.bias, Scale(db2, nn.lr))
+    print("update W1")
+    wshape := nn.layer1.weights.shape
+    wlen := len(nn.layer1.weights.data)
+    wr := wshape[0]
+    wc := wshape[1]
+    print("weights shape: {wr}x{wc}, data len: {wlen}")
+    // nn.layer1.weights = Sub(nn.layer1.weights, Scale(dW1, nn.lr))
+    print("skipped W1 update")
+    print("update b1")
+    bshape = nn.layer1.bias.shape
+    blen = len(nn.layer1.bias.data)
+    sr = bshape[0]
+    sc = bshape[1]
+    print("bias shape: {sr}x{sc}, data len: {blen}")
+    print("a")
+    newBias := Zeros(nn.layer1.bias.shape)
+    print("b")
+    idx := 0
+    print("c")
+    for idx < len(nn.layer1.bias.data) {
+        newBias.data[idx] = nn.layer1.bias.data[idx] - db1.data[idx] * nn.lr
+        idx = idx + 1
+    }
+    print("d")
+    nn.layer1.bias.data = newBias.data
+    print("e")
+    nn.layer1.bias.shape = newBias.shape
+    print("f")
+    nn.layer1.bias.rank = newBias.rank
+    print("updates done")
+}
+
+fn main() -> int {
+    print("Loading data...")
+    data, err := dataset.LoadIrisDataset("data/iris.csv")
+    if err.message != "" {
+        print("Failed")
+        return 1
+    }
+    
+    print("Creating NN...")
+    nn := NewNN()
+    
+    print("Training...")
+    Train(&nn, data.features, data.labels)
+    print("Done!")
+    return 0
+}

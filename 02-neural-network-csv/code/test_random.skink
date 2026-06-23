@@ -1,0 +1,16 @@
+module main
+
+import "std/tensor"
+
+fn main() -> int {
+    i := 0
+    for i < 10 {
+        t := Random([2, 3])
+        v0 := t.data[0]
+        v1 := t.data[1]
+        v2 := t.data[2]
+        print("t[{i}]: {v0}, {v1}, {v2}")
+        i = i + 1
+    }
+    return 0
+}

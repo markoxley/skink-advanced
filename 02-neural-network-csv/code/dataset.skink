@@ -1,0 +1,54 @@
+module dataset
+
+import "std/tensor"
+import "csv_parser"
+import "std/str"
+import "std/errors"
+
+pub struct Dataset {
+    features: Tensor
+    labels: Tensor
+    numClasses: int
+}
+
+pub fn LoadIrisDataset(path: string) -> (Dataset, Error) {
+    parser := csv_parser.NewCSVParser(",")
+    rows, err := csv_parser.ParseFile(parser, path)
+    if err.message != "" {
+        return Dataset{features: Zeros([0, 0]), labels: Zeros([0, 0]), numClasses: 0}, err
+    }
+    
+    numSamples := len(rows)
+    numFeatures := 4
+    numClasses := 3
+    
+    features := Zeros([numSamples, numFeatures])
+    labels := Zeros([numSamples, numClasses])
+    
+    i := 0
+    for i < len(rows) {
+        j := 0
+        for j < 4 {
+            val := csv_parser.ParseFloatField(rows[i], j)
+            features.Set([i, j], val)
+            j = j + 1
+        }
+        
+        classLabel := csv_parser.ParseStringField(rows[i], 4)
+        classIdx := 0
+        if str.Equal(classLabel, "versicolor") {
+            classIdx = 1
+        } else if str.Equal(classLabel, "virginica") {
+            classIdx = 2
+        }
+        labels.Set([i, classIdx], 1.0)
+        
+        i = i + 1
+    }
+    
+    return Dataset{
+        features: features,
+        labels: labels,
+        numClasses: numClasses
+    }, New("")
+}

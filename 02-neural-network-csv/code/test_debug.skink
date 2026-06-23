@@ -1,0 +1,22 @@
+module main
+
+import "std/tensor"
+import "dataset"
+import "neural_net"
+
+fn main() -> int {
+    print("Loading data...")
+    data, err := dataset.LoadIrisDataset("data/iris.csv")
+    if err.message != "" {
+        print("Failed")
+        return 1
+    }
+    
+    print("Creating NN...")
+    nn := neural_net.NewNeuralNetwork(4, 16, 8, 3, 0.01)
+    
+    print("Training 1 epoch...")
+    neural_net.Train(&nn, data.features, data.labels, 1)
+    print("Done!")
+    return 0
+}

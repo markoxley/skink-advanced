@@ -1,0 +1,99 @@
+module main
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+import "std/fmt"
+
+struct SensorData {
+    deviceId: string
+    temperature: float
+    humidity: float
+    timestamp: int
+}
+
+struct Rule {
+    name: string
+    condition: string
+    threshold: float
+    act: string
+}
+
+fn createSensorData(deviceId: string, temperature: float, humidity: float, timestamp: int) -> SensorData {
+    return SensorData{deviceId: deviceId, temperature: temperature, humidity: humidity, timestamp: timestamp}
+}
+
+fn evaluateRule(r: Rule, data: SensorData) -> bool {
+    if str.Equal(r.condition, "temperature >") {
+        return data.temperature > r.threshold
+    }
+    if str.Equal(r.condition, "humidity >") {
+        return data.humidity > r.threshold
+    }
+    return false
+}
+
+fn main() -> int {
+    print("Starting IoT Monitoring System...")
+    
+    // Create log file
+    logPath := "sensor_log.txt"
+    fs.WriteAll(logPath, "")
+    
+    // Define rules
+    rules := []Rule{
+        Rule{name: "high_temp", condition: "temperature >", threshold: 30.0, act: "alert"},
+        Rule{name: "high_humidity", condition: "humidity >", threshold: 70.0, act: "alert"}
+    }
+    
+    // Simulate sensor readings
+    readings := []SensorData{
+        createSensorData("sensor_1", 22.5, 45.0, 1),
+        createSensorData("sensor_2", 35.0, 60.0, 2),
+        createSensorData("sensor_3", 25.0, 75.0, 3)
+    }
+    
+    numReadings := len(readings)
+    numRules := len(rules)
+    print("Processing {numReadings} sensor readings with {numRules} rules...")
+    
+    i := 0
+    for i < numReadings {
+        data := readings[i]
+        devId := data.deviceId
+        tempVal := int(data.temperature)
+        humidVal := int(data.humidity)
+        tempStr := fmt.Itoa(tempVal)
+        humidStr := fmt.Itoa(humidVal)
+        print("Device {devId}: Temp={tempStr}C, Humidity={humidStr}%")
+        
+        j := 0
+        for j < numRules {
+            if evaluateRule(rules[j], data) {
+                ruleName := rules[j].name
+                alertMsg := str.Concat("ALERT: ", str.Concat(ruleName, " triggered for "))
+                alertMsg = str.Concat(alertMsg, devId)
+                print(alertMsg)
+                
+                // Log to file
+                existing, _ := fs.ReadAll(logPath)
+                logged := str.Concat(existing, str.Concat(alertMsg, "\n"))
+                fs.WriteAll(logPath, logged)
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    
+    // Read back log
+    logContent, _ := fs.ReadAll(logPath)
+    if str.Len(logContent) > 0 {
+        print("\nLogged alerts:")
+        print(logContent)
+    } else {
+        print("\nNo alerts triggered")
+    }
+    
+    print("\nMonitoring stopped")
+    return 0
+}

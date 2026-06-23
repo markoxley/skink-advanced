@@ -1,0 +1,67 @@
+module main
+
+import "std/fs"
+import "std/str"
+import "std/errors"
+
+struct Tool {
+    name: string
+    description: string
+}
+
+fn RegisterTool(tools: []Tool, name: string, description: string) -> []Tool {
+    return append(tools, Tool{name: name, description: description})
+}
+
+fn ListTools(tools: []Tool) -> string {
+    result := "Tools:\n"
+    i := 0
+    for i < len(tools) {
+        t := tools[i]
+        line := str.Concat("- ", str.Concat(t.name, ": "))
+        line = str.Concat(line, t.description)
+        line = str.Concat(line, "\n")
+        result = str.Concat(result, line)
+        i = i + 1
+    }
+    return result
+}
+
+fn HandleFileRead(path: string) -> (string, Error) {
+    content, err := fs.ReadAll(path)
+    return content, err
+}
+
+fn HandleFileWrite(path: string, data: string) -> Error {
+    return fs.WriteAll(path, data)
+}
+
+fn main() -> int {
+    print("Starting Skink MCP Server...")
+    
+    tools := []Tool{}
+    tools = RegisterTool(tools, "file_read", "Read file contents")
+    tools = RegisterTool(tools, "file_write", "Write content to a file")
+    tools = RegisterTool(tools, "system_info", "Get system information")
+    
+    numTools := len(tools)
+    print("Registered {numTools} tools")
+    
+    toolsList := ListTools(tools)
+    print(toolsList)
+    
+    // Test file read tool
+    testPath := "test_mcp.txt"
+    writeErr := HandleFileWrite(testPath, "Hello from MCP server!")
+    writeMsg := writeErr.message
+    if writeMsg == "" {
+        content, readErr := HandleFileRead(testPath)
+        readMsg := readErr.message
+        if readMsg == "" {
+            print("File content: {content}")
+        }
+    }
+    
+    print("Server simulation complete")
+    return 0
+}
