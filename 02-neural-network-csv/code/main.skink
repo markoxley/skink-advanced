@@ -20,8 +20,8 @@ fn main() -> int {
     print("Classes: {numClasses}")
     
     print("\nCreating neural network...")
-    nn := neural_net.NewNeuralNetwork(4, 16, 8, 3, 0.001)
-    print("Network architecture: 4 -> 16 -> 8 -> 3")
+    nn := neural_net.NewNeuralNetwork(4, 12, 6, 3, 0.001)
+    print("Network architecture: 4 -> 12 -> 6 -> 3")
     epochs := 10000
     print("Training model {epochs} epochs...\n")
     neural_net.Train(&nn, data.features, data.labels, epochs)

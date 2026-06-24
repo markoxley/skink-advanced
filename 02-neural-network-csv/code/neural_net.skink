@@ -52,10 +52,10 @@ fn sumRows(t: Tensor) -> Tensor {
         s := 0.0
         i := 0
         for i < rows {
-            s = s + t.Get([i, j])
+            s = s + t.data[i * cols + j]
             i = i + 1
         }
-        result.Set([0, j], s)
+        result.data[j] = s
         j = j + 1
     }
     return result
@@ -110,14 +110,15 @@ pub fn Train(nn: *NeuralNetwork, x: Tensor, y: Tensor, epochs: int) {
         
         // Compute integer targets for loss
         batchSize := x.Shape()[0]
+        numClasses := 3
         targets := make([]int, batchSize)
         i := 0
         for i < batchSize {
-            maxVal := y.Get([i, 0])
+            maxVal := y.data[i * numClasses]
             maxIdx := 0
             j := 1
-            for j < 3 {
-                val := y.Get([i, j])
+            for j < numClasses {
+                val := y.data[i * numClasses + j]
                 if val > maxVal {
                     maxVal = val
                     maxIdx = j
@@ -166,11 +167,11 @@ pub fn Accuracy(nn: NeuralNetwork, x: Tensor, y: Tensor) -> float {
     
     i := 0
     for i < batchSize {
-        maxPred := predictions.Get([i, 0])
+        maxPred := predictions.data[i * numClasses]
         predClass := 0
         j := 1
         for j < numClasses {
-            val := predictions.Get([i, j])
+            val := predictions.data[i * numClasses + j]
             if val > maxPred {
                 maxPred = val
                 predClass = j
@@ -178,11 +179,11 @@ pub fn Accuracy(nn: NeuralNetwork, x: Tensor, y: Tensor) -> float {
             j = j + 1
         }
         
-        maxTrue := y.Get([i, 0])
+        maxTrue := y.data[i * numClasses]
         trueClass := 0
         k := 1
         for k < numClasses {
-            val := y.Get([i, k])
+            val := y.data[i * numClasses + k]
             if val > maxTrue {
                 maxTrue = val
                 trueClass = k
