@@ -57,6 +57,9 @@ fn main() -> int {
     numRules := len(rules)
     print("Processing {numReadings} sensor readings with {numRules} rules...")
     
+    // Use builder for log accumulation
+    logBuilder := str.NewBuilder(1024)
+    
     i := 0
     for i < numReadings {
         data := readings[i]
@@ -71,23 +74,22 @@ fn main() -> int {
         for j < numRules {
             if evaluateRule(rules[j], data) {
                 ruleName := rules[j].name
-                alertMsg := str.Concat("ALERT: ", str.Concat(ruleName, " triggered for "))
-                alertMsg = str.Concat(alertMsg, devId)
+                alertMsg := "ALERT: " + ruleName + " triggered for " + devId
                 print(alertMsg)
                 
-                // Log to file
-                existing, _ := fs.ReadAll(logPath)
-                logged := str.Concat(existing, str.Concat(alertMsg, "\n"))
-                fs.WriteAll(logPath, logged)
+                // Log to file using builder
+                logBuilder.Write(alertMsg)
+                logBuilder.Write("\n")
             }
             j = j + 1
         }
         i = i + 1
     }
     
-    // Read back log
-    logContent, _ := fs.ReadAll(logPath)
+    // Write accumulated logs
+    logContent := logBuilder.String()
     if str.Len(logContent) > 0 {
+        fs.AppendAll(logPath, logContent)
         print("\nLogged alerts:")
         print(logContent)
     } else {

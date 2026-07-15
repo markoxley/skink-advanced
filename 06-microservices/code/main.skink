@@ -79,15 +79,23 @@ fn main() -> int {
     }
     
     // Save to file
-    report := "Microservices Report\n"
     userStr := fmt.Itoa(numUsers)
     productStr := fmt.Itoa(numProducts)
     orderStr := fmt.Itoa(numOrders)
-    report = str.Concat(report, str.Concat("Users: ", str.Concat(userStr, "\n")))
-    report = str.Concat(report, str.Concat("Products: ", str.Concat(productStr, "\n")))
-    report = str.Concat(report, str.Concat("Orders: ", str.Concat(orderStr, "\n")))
     
-    err := fs.WriteAll("microservices_report.txt", report)
+    b := str.NewBuilder(256)
+    b.Write("Microservices Report\n")
+    b.Write("Users: ")
+    b.Write(userStr)
+    b.Write("\n")
+    b.Write("Products: ")
+    b.Write(productStr)
+    b.Write("\n")
+    b.Write("Orders: ")
+    b.Write(orderStr)
+    b.Write("\n")
+    
+    err := fs.WriteAll("microservices_report.txt", b.String())
     if err.message == "" {
         print("\nReport saved")
     }

@@ -1,44 +1,292 @@
 module main
 
 import "std/fs"
-import "std/str"
-import "std/errors"
-import "logger"
+import "std/llm"
+import "std/net"
+import "std/web/router"
+import "std/web/types"
+
+var model: llm.Context
+var hasModel: bool
+var logPath: string
+
+pub fn intToString(n: int) -> string {
+    if n == 0 {
+        return "0"
+    }
+    negative := false
+    if n < 0 {
+        negative = true
+        n = -n
+    }
+    digits := ""
+    for n > 0 {
+        digit := n % 10
+        digits = str.Concat(str.Substr("0123456789", digit, 1), digits)
+        n = n / 10
+    }
+    if negative {
+        digits = str.Concat("-", digits)
+    }
+    return digits
+}
+
+fn statusText(code: int) -> string {
+    if code == 200 { return "OK" }
+    if code == 400 { return "Bad Request" }
+    if code == 404 { return "Not Found" }
+    if code == 403 { return "Forbidden" }
+    if code == 500 { return "Internal Server Error" }
+    return "Unknown"
+}
+
+fn serializeResponse(w: *types.ResponseWriter) -> string {
+    text := statusText(w.Status())
+    body := w.ResponseBody()
+    bodyLen := str.Len(body)
+    response := str.Concat("HTTP/1.1 ", str.Concat(intToString(w.Status()), str.Concat(" ", str.Concat(text, "\r\n"))))
+    response = str.Concat(response, str.Concat("Content-Length: ", str.Concat(intToString(bodyLen), "\r\n")))
+    response = str.Concat(response, "Connection: close\r\n")
+    response = str.Concat(response, "\r\n")
+    response = str.Concat(response, body)
+    return response
+}
+
+fn parseRequest(buf: string, bufLen: int) -> types.Request {
+    method := ""
+    path := ""
+    query := ""
+    headers := make(map[string]string)
+    body := ""
+
+    firstLineEnd := str.IndexOf(buf, "\r\n")
+    if firstLineEnd < 0 {
+        firstLineEnd = str.IndexOf(buf, "\n")
+    }
+    if firstLineEnd >= 0 {
+        firstLine := str.Substr(buf, 0, firstLineEnd)
+        parts := str.Split(firstLine, " ")
+        if len(parts) >= 2 {
+            method = parts[0]
+            fullPath := parts[1]
+            qIdx := str.IndexOf(fullPath, "?")
+            if qIdx >= 0 {
+                path = str.Substr(fullPath, 0, qIdx)
+                query = str.Substr(fullPath, qIdx + 1, str.Len(fullPath) - qIdx - 1)
+            } else {
+                path = fullPath
+            }
+        }
+    }
+
+    headersEnd := str.IndexOf(buf, "\r\n\r\n")
+    headerOffset := 0
+    if headersEnd >= 0 {
+        headerOffset = headersEnd + 4
+    } else {
+        headersEnd = str.IndexOf(buf, "\n\n")
+        if headersEnd >= 0 {
+            headerOffset = headersEnd + 2
+        }
+    }
+
+    if firstLineEnd >= 0 && headersEnd > firstLineEnd {
+        headerBlock := str.Substr(buf, firstLineEnd + 2, headersEnd - firstLineEnd - 2)
+        headerLines := str.Split(headerBlock, "\r\n")
+        i := 0
+        for i < len(headerLines) {
+            line := headerLines[i]
+            colon := str.IndexOf(line, ":")
+            if colon >= 0 {
+                key := str.Substr(line, 0, colon)
+                value := str.Substr(line, colon + 1, str.Len(line) - colon - 1)
+                if str.StartsWith(value, " ") {
+                    value = str.Substr(value, 1, str.Len(value) - 1)
+                }
+                headers[key] = value
+            }
+            i = i + 1
+        }
+    }
+
+    if headerOffset > 0 && headerOffset < bufLen {
+        body = str.Substr(buf, headerOffset, bufLen - headerOffset)
+    }
+
+    return types.Request{method: method, path: path, query: query, headers: headers, body: body}
+}
+
+fn handleConnection(conn: net.Connection, r: *router.Router) {
+    buf := libc.malloc(8192)
+    total := conn.Read(buf, 8191)
+    if total > 0 {
+        buf[total] = 0
+        req := parseRequest(buf, total)
+        w := types.ResponseWriter{status: 200, headers: make(map[string]string), body: ""}
+        r.ServeHTTP(req, &w)
+        response := serializeResponse(&w)
+        conn.Send(response)
+    }
+    conn.Close()
+    libc.free(buf)
+}
+
+fn initLog(path: string) -> errors.Error {
+    logPath = path
+    return fs.WriteAll(path, "")
+}
+
+fn logMessage(message: string) {
+    if logPath == "" {
+        return
+    }
+    existing, _ := fs.ReadAll(logPath)
+    updated := str.Concat(existing, str.Concat(message, "\n"))
+    fs.WriteAll(logPath, updated)
+}
+
+fn loadModelOrFallback() -> (llm.Context, bool) {
+    if fs.Exists("models/model.gguf") {
+        ctx, err := llm.LoadModel("models/model.gguf", 2048)
+        if err.message == "" {
+            print("Loaded model: models/model.gguf")
+            return ctx, true
+        }
+    }
+    if fs.Exists("model.gguf") {
+        ctx, err := llm.LoadModel("model.gguf", 2048)
+        if err.message == "" {
+            print("Loaded model: model.gguf")
+            return ctx, true
+        }
+    }
+    if fs.Exists("data/model.gguf") {
+        ctx, err := llm.LoadModel("data/model.gguf", 2048)
+        if err.message == "" {
+            print("Loaded model: data/model.gguf")
+            return ctx, true
+        }
+    }
+    print("No GGUF model found; running in demo mode with rule-based responses")
+    return llm.Context{modelPath: "", nCtx: 0, handle: int64(0)}, false
+}
+
+fn generateResponse(prompt: string) -> string {
+    if hasModel {
+        m := model
+        response, err := m.Generate(prompt, 128)
+        if err.message == "" {
+            return response
+        }
+    }
+    return generateFallbackResponse(prompt)
+}
+
+fn generateFallbackResponse(prompt: string) -> string {
+    lower := str.ToLower(prompt)
+    if str.Contains(lower, "hello") || str.Contains(lower, "hi") {
+        return "Hello! I'm a Skink-powered assistant running in demo mode."
+    }
+    if str.Contains(lower, "skink") {
+        return "Skink is a modern systems programming language that compiles to native code via LLVM."
+    }
+    if str.Contains(lower, "help") {
+        return "I can answer simple questions. To use real LLM inference, place a GGUF model at models/model.gguf."
+    }
+    return "Interesting question! (Running in demo mode — place a GGUF model at models/model.gguf for real inference.)"
+}
+
+fn chatHandler(req: types.Request, w: *types.ResponseWriter) {
+    body, parseErr := req.ParseJSON()
+    if parseErr.message != "" {
+        w.WriteHeader(400)
+        w.JSON(400, "{\"error\": \"Invalid JSON\"}")
+        return
+    }
+    promptVal := json.ObjectGet(body, "prompt")
+    prompt := json.AsString(promptVal)
+    if prompt == "" {
+        w.WriteHeader(400)
+        w.JSON(400, "{\"error\": \"prompt is required\"}")
+        return
+    }
+
+    response := generateResponse(prompt)
+    logMessage(str.Concat("POST /api/chat prompt=", str.Concat(prompt, str.Concat(" response=", response))))
+
+    result := json.FromObject(
+        []string{"response"},
+        []json.Value{json.FromString(response)}
+    )
+    w.JSONValue(200, result)
+}
+
+fn healthHandler(req: types.Request, w: *types.ResponseWriter) {
+    w.JSON(200, "{\"status\":\"ok\"}")
+}
+
+fn serveStaticFile(path: string, w: *types.ResponseWriter) {
+    content, err := fs.ReadAll(path)
+    if err.message != "" {
+        w.WriteHeader(404)
+        w.Write("Not Found")
+        return
+    }
+    w.WriteHeader(200)
+    w.Write(content)
+}
+
+fn indexHandler(req: types.Request, w: *types.ResponseWriter) {
+    serveStaticFile("static/index.html", w)
+}
+
+fn staticHandler(req: types.Request, w: *types.ResponseWriter) {
+    path := req.Path()
+    if str.StartsWith(path, "/static/") {
+        path = str.Substr(path, 8, str.Len(path) - 8)
+    }
+    if str.Contains(path, "..") {
+        w.WriteHeader(403)
+        w.Write("Forbidden")
+        return
+    }
+    serveStaticFile(str.Concat("static/", path), w)
+}
 
 fn main() -> int {
     print("Starting LLM Web Application...")
-    
-    // Initialize logger
-    log, err := logger.NewLogger("app.log")
-    errMsg := err.message
-    if errMsg != "" {
-        print("Failed to create logger: {errMsg}")
+
+    err := initLog("app.log")
+    if err.message != "" {
+        print("Failed to create logger: {err.message}")
         return 1
     }
-    
-    print("Server would start on :8080")
+
+    model, hasModel = loadModelOrFallback()
+
+    r := router.NewRouter()
+    r.Get("/health", healthHandler)
+    r.Get("/", indexHandler)
+    r.Get("/static/*", staticHandler)
+    r.Post("/api/chat", chatHandler)
+
+    logMessage("Server started on :8080")
+    print("Server listening on http://0.0.0.0:8080")
     print("Static files served from /static")
-    print("Chat endpoint: /api/chat")
-    print("Health check: /health")
-    
-    // Simulate request logging
-    logger.Log(log, "GET /health")
-    logger.Log(log, "POST /api/chat")
-    logger.Log(log, "GET /static/index.html")
-    
-    // Read back the log file
-    content, readErr := fs.ReadAll("app.log")
-    readMsg := readErr.message
-    if readMsg == "" {
-        lines := str.Split(content, "\n")
-        numLines := len(lines)
-        print("\nLog file contains {numLines} lines")
-        print("Log contents:")
-        print(content)
+    print("Chat endpoint: POST /api/chat")
+    print("Health check: GET /health")
+
+    listener, listenErr := net.Listen("0.0.0.0", 8080)
+    if listenErr.message != "" {
+        print("Failed to listen: {listenErr.message}")
+        return 1
     }
-    
-    logger.Close(log)
-    
-    print("\nApplication shutdown complete")
-    return 0
+
+    for {
+        conn, acceptErr := net.Accept(listener)
+        if acceptErr.message != "" {
+            continue
+        }
+        handleConnection(conn, &r)
+    }
 }

@@ -26,18 +26,21 @@ fn processURL(url: string) -> Result {
 }
 
 fn saveResults(results: []Result, path: string) -> Error {
-    csv := "URL,Status,Title\n"
+    b := str.NewBuilder(1024)
+    b.Write("URL,Status,Title\n")
     i := 0
     for i < len(results) {
         r := results[i]
         statusStr := fmt.Itoa(r.status)
-        line := str.Concat(r.url, ",")
-        line = str.Concat(line, str.Concat(statusStr, ","))
-        line = str.Concat(line, str.Concat(r.title, "\n"))
-        csv = str.Concat(csv, line)
+        b.Write(r.url)
+        b.Write(",")
+        b.Write(statusStr)
+        b.Write(",")
+        b.Write(r.title)
+        b.Write("\n")
         i = i + 1
     }
-    return fs.WriteAll(path, csv)
+    return fs.WriteAll(path, b.String())
 }
 
 fn main() -> int {

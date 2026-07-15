@@ -14,17 +14,19 @@ fn RegisterTool(tools: []Tool, name: string, description: string) -> []Tool {
 }
 
 fn ListTools(tools: []Tool) -> string {
-    result := "Tools:\n"
+    b := str.NewBuilder(512)
+    b.Write("Tools:\n")
     i := 0
     for i < len(tools) {
         t := tools[i]
-        line := str.Concat("- ", str.Concat(t.name, ": "))
-        line = str.Concat(line, t.description)
-        line = str.Concat(line, "\n")
-        result = str.Concat(result, line)
+        b.Write("- ")
+        b.Write(t.name)
+        b.Write(": ")
+        b.Write(t.description)
+        b.Write("\n")
         i = i + 1
     }
-    return result
+    return b.String()
 }
 
 fn HandleFileRead(path: string) -> (string, Error) {

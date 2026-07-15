@@ -1,4 +1,0 @@
-Microservices Report
-Users: 2
-Products: 2
-Orders: 2
