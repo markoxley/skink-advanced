@@ -1,4 +1,8 @@
-struct SensorReading {
+module sensor_data
+
+import "std/time"
+
+pub struct SensorReading {
     deviceId: string
     sensorType: string
     value: float
@@ -6,7 +10,7 @@ struct SensorReading {
     unit: string
 }
 
-struct Alert {
+pub struct Alert {
     ruleName: string
     message: string
     severity: string
@@ -14,12 +18,12 @@ struct Alert {
     sensorData: SensorReading
 }
 
-fn NewSensorReading(deviceId: string, sensorType: string, value: float, unit: string) -> SensorReading {
+pub fn NewSensorReading(deviceId: string, sensorType: string, value: float, unit: string) -> SensorReading {
     return SensorReading{
         deviceId: deviceId,
         sensorType: sensorType,
         value: value,
-        timestamp: time.Now().Unix(),
+        timestamp: time.Timestamp(),
         unit: unit
     }
 }

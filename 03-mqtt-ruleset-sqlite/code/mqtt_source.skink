@@ -1,81 +1,117 @@
+module mqtt_source
+
 import "std/mqtt"
-import "std/rules"
-import "sensor_data"
+import "std/str"
+import "std/sync"
+import "std/errors"
 import "db_logger"
 
-template MQTTSource for rules.RuleSource {
+// MQTTSource connects to an MQTT broker, subscribes to a topic and stores the
+// most recent sensor reading. Receiving actual MQTT payloads currently requires
+// libmosquitto message callbacks, which are not yet bound in std/mqtt, so this
+// implementation keeps the subscription and connection lifecycle while exposing
+// a way to inject readings for testing.
+pub struct MQTTSource {
     client: mqtt.Client
     topic: string
-    currentReading: SensorReading
-    logger: DBLogger
-    mutex: sync.Mutex
-    
-    fn name() -> string {
-        return "mqtt_sensor_source"
+    currentReading: db_logger.SensorReading
+    logger: db_logger.DBLogger
+    mu: *sync.Mutex
+    stopped: bool
+}
+
+fn zeroSource() -> MQTTSource {
+    var s MQTTSource
+    s.mu = sync.NewMutex()
+    return s
+}
+
+pub fn NewMQTTSource(host: string, port: int, topic: string, logger: db_logger.DBLogger) -> (MQTTSource, errors.Error) {
+    client, err := mqtt.NewClient("skink_monitor", host, port)
+    if err.message != "" {
+        return zeroSource(), err
     }
-    
-    fn start() {
-        // Subscribe to MQTT topic
-        client.Subscribe(self.topic, 0, fn(topic: string, payload: []byte) {
-            // Parse sensor data from MQTT message
-            // Expected format: JSON or simple "device:sensor:value:unit"
-            data := string(payload)
-            parts := str.Split(data, ":")
-            
-            if len(parts) >= 4 {
-                deviceId := parts[0]
-                sensorType := parts[1]
-                value := str.ParseFloat(parts[2])
-                unit := parts[3]
-                
-                reading := NewSensorReading(deviceId, sensorType, value, unit)
-                
-                self.mutex.Lock()
-                self.currentReading = reading
-                self.mutex.Unlock()
-                
-                // Log to database
-                self.logger.LogReading(reading)
-            }
-        })
-        
-        // Start MQTT client loop
-        client.Start()
+
+    err = client.Connect()
+    if err.message != "" {
+        client.Close()
+        return zeroSource(), err
     }
-    
-    fn stop() {
-        self.client.Unsubscribe(self.topic)
-        self.client.Stop()
+
+    var s MQTTSource
+    s.client = client
+    s.topic = topic
+    s.logger = logger
+    s.mu = sync.NewMutex()
+    s.stopped = false
+    return s, errors.New("")
+}
+
+pub fn Start(self: *MQTTSource) -> errors.Error {
+    err := self.client.Subscribe(self.topic, 0)
+    if err.message != "" {
+        return err
     }
-    
-    fn triggered() -> bool {
-        // Check if current reading meets any rule conditions
-        // This is called by the ruleset engine
-        return true // Always trigger to evaluate all rules
-    }
-    
-    fn action() {
-        // Default action - can be overridden by specific rules
-        print("MQTT message received: {self.currentReading.deviceId} - {self.currentReading.value}")
-    }
-    
-    fn priority() -> int {
-        return 10
-    }
-    
-    fn GetReading() -> SensorReading {
-        self.mutex.Lock()
-        defer self.mutex.Unlock()
-        return self.currentReading
+
+    // Without a message callback the client cannot receive payloads here.
+    // The connection and subscription are set up so the lifecycle matches the
+    // expected API.
+    return errors.New("")
+}
+
+pub fn Stop(self: *MQTTSource) {
+    self.stopped = true
+    self.client.Disconnect()
+    self.client.Close()
+}
+
+// HandlePayload parses a "device:sensor:value:unit" payload, stores it and
+// logs it to the configured logger. The numeric value is not parsed because
+// the standard library does not yet expose a string-to-float parser.
+pub fn HandlePayload(self: *MQTTSource, payload: string) {
+    parts := str.Split(payload, ":")
+    if len(parts) >= 4 {
+        reading := db_logger.NewSensorReading(parts[0], parts[1], 0.0, parts[3])
+        self.StoreReading(reading)
     }
 }
 
-fn NewMQTTSource(broker: string, topic: string, logger: DBLogger) -> MQTTSource {
-    client := mqtt.NewClient(broker, "skink_monitor")
-    return MQTTSource{
-        client: client,
-        topic: topic,
-        logger: logger,
-        mutex: sync.Mutex{}
-    }
+pub fn StoreReading(self: *MQTTSource, reading: db_logger.SensorReading) {
+    self.mu.Lock()
+    self.currentReading = reading
+    self.mu.Unlock()
+    self.logger.LogReading(reading)
+}
+
+pub fn GetReading(self: *MQTTSource) -> db_logger.SensorReading {
+    self.mu.Lock()
+    r := self.currentReading
+    self.mu.Unlock()
+    return r
+}
+
+// RuleSource template implementation.
+pub fn name(self: *MQTTSource) -> string {
+    return "mqtt_sensor_source"
+}
+
+pub fn start(self: *MQTTSource) {
+    self.Start()
+}
+
+pub fn stop(self: *MQTTSource) {
+    self.Stop()
+}
+
+pub fn triggered(self: *MQTTSource) -> bool {
+    return true
+}
+
+pub fn Action(self: *MQTTSource) {
+    // Real MQTT reception is not yet available; this is a placeholder for the
+    // rule source action hook.
+}
+
+pub fn Priority(self: *MQTTSource) -> int {
+    return 10
 }

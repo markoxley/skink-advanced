@@ -1,10 +1,24 @@
-import "std/rules"
-import "sensor_data"
-import "db_logger"
+module monitoring
+
+// Simulated temperature used by the ruleset. In a full integration the value
+// would be supplied by an MQTT source payload.
+var currentTemp: float = 65.0
+
+pub fn SetTemperature(t: float) {
+    currentTemp = t
+}
+
+pub fn Start() {
+    SensorMonitoring.start()
+}
+
+pub fn Stop() {
+    SensorMonitoring.stop()
+}
 
 ruleset SensorMonitoring {
     // High temperature alert
-    rule high_temp when temp > 80.0 {
+    rule high_temp when currentTemp > 80.0 {
         action: fn() {
             print("ALERT: High temperature detected")
         }
@@ -12,7 +26,7 @@ ruleset SensorMonitoring {
     }
     
     // Low temperature alert
-    rule low_temp when temp < 10.0 {
+    rule low_temp when currentTemp < 10.0 {
         action: fn() {
             print("WARNING: Low temperature detected")
         }
@@ -20,7 +34,7 @@ ruleset SensorMonitoring {
     }
     
     // Normal operation log
-    rule normal_operation when true {
+    rule normal_operation when currentTemp >= 10.0 && currentTemp <= 80.0 {
         action: fn() {
             print("Normal operation")
         }

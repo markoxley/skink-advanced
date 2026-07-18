@@ -1,82 +1,112 @@
+module db_logger
+
 import "std/db"
-import "sensor_data"
+import "std/str"
+import "std/fmt"
+import "std/time"
 
-struct DBLogger {
-    conn: db.Connection
+pub struct SensorReading {
+    deviceId: string
+    sensorType: string
+    value: float
+    timestamp: int
+    unit: string
 }
 
-fn NewDBLogger(dbPath: string) -> (DBLogger, error) {
-    conn, err := db.Open("sqlite", dbPath)
-    if err != nil {
-        return DBLogger{}, err
+pub fn NewSensorReading(deviceId: string, sensorType: string, value: float, unit: string) -> SensorReading {
+    return SensorReading{
+        deviceId: deviceId,
+        sensorType: sensorType,
+        value: value,
+        timestamp: time.Timestamp(),
+        unit: unit
     }
-    
-    // Create tables
-    conn.Exec(`
-        CREATE TABLE IF NOT EXISTS sensor_readings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            device_id TEXT NOT NULL,
-            sensor_type TEXT NOT NULL,
-            value REAL NOT NULL,
-            unit TEXT NOT NULL,
-            timestamp INTEGER NOT NULL
-        )
-    `)
-    
-    conn.Exec(`
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rule_name TEXT NOT NULL,
-            message TEXT NOT NULL,
-            severity TEXT NOT NULL,
-            timestamp INTEGER NOT NULL,
-            sensor_id INTEGER,
-            FOREIGN KEY (sensor_id) REFERENCES sensor_readings(id)
-        )
-    `)
-    
-    return DBLogger{conn: conn}, nil
 }
 
-fn (l: *DBLogger) LogReading(reading: SensorReading) -> error {
-    _, err := l.conn.Exec(
-        "INSERT INTO sensor_readings (device_id, sensor_type, value, unit, timestamp) VALUES (?, ?, ?, ?, ?)",
-        reading.deviceId, reading.sensorType, reading.value, reading.unit, reading.timestamp
-    )
-    return err
+pub struct Alert {
+    ruleName: string
+    message: string
+    severity: string
+    timestamp: int
+    sensorData: SensorReading
 }
 
-fn (l: *DBLogger) LogAlert(alert: Alert) -> error {
-    // First log the sensor reading
-    sensorId, err := l.conn.LastInsertId()
-    if err != nil {
+pub struct DBLogger {
+    conn: db.Connection
+
+    pub fn NewDBLogger(dbPath: string) -> (DBLogger, error) {
+        conn, err := db.Open("sqlite3", dbPath)
+        if err.message != "" {
+            return DBLogger{conn: db.Connection{driver: "", dsn: "", handle: 0}}, err
+        }
+
+        var res db.Result
+        res, err = conn.Exec("CREATE TABLE IF NOT EXISTS sensor_readings (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sensor_type TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL, timestamp INTEGER NOT NULL)")
+        if err.message != "" {
+            return DBLogger{conn: db.Connection{driver: "", dsn: "", handle: 0}}, err
+        }
+
+        res, err = conn.Exec("CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_name TEXT NOT NULL, message TEXT NOT NULL, severity TEXT NOT NULL, timestamp INTEGER NOT NULL, sensor_id INTEGER)")
+        if err.message != "" {
+            return DBLogger{conn: db.Connection{driver: "", dsn: "", handle: 0}}, err
+        }
+
+        return DBLogger{conn: conn}, nil
+    }
+
+    pub fn LogReading(self: *DBLogger, reading: SensorReading) -> error {
+        deviceId := str.Replace(reading.deviceId, "'", "''")
+        sensorType := str.Replace(reading.sensorType, "'", "''")
+        unit := str.Replace(reading.unit, "'", "''")
+
+        b := str.NewBuilder(256)
+        b.Write("INSERT INTO sensor_readings (device_id, sensor_type, value, unit, timestamp) VALUES ('")
+        b.Write(deviceId)
+        b.Write("','")
+        b.Write(sensorType)
+        b.Write("',")
+        b.Write(fmt.Ftoa(reading.value))
+        b.Write(",'")
+        b.Write(unit)
+        b.Write("',")
+        b.Write(fmt.Itoa(reading.timestamp))
+        b.Write(")")
+
+        var res db.Result
+        var err error
+        res, err = self.conn.Exec(b.String())
         return err
     }
-    
-    _, err = l.conn.Exec(
-        "INSERT INTO alerts (rule_name, message, severity, timestamp, sensor_id) VALUES (?, ?, ?, ?, ?)",
-        alert.ruleName, alert.message, alert.severity, alert.timestamp, sensorId
-    )
-    return err
-}
 
-fn (l: *DBLogger) GetRecentReadings(limit: int) -> ([]SensorReading, error) {
-    rows, err := l.conn.Query("SELECT device_id, sensor_type, value, unit, timestamp FROM sensor_readings ORDER BY timestamp DESC LIMIT ?", limit)
-    if err != nil {
-        return []SensorReading{}, err
-    }
-    defer rows.Close()
-    
-    readings := []SensorReading{}
-    for rows.Next() {
-        reading := SensorReading{}
-        rows.Scan(&reading.deviceId, &reading.sensorType, &reading.value, &reading.unit, &reading.timestamp)
-        readings = append(readings, reading)
-    }
-    
-    return readings, nil
-}
+    pub fn LogAlert(self: *DBLogger, alert: Alert) -> error {
+        ruleName := str.Replace(alert.ruleName, "'", "''")
+        message := str.Replace(alert.message, "'", "''")
+        severity := str.Replace(alert.severity, "'", "''")
 
-fn (l: *DBLogger) Close() {
-    l.conn.Close()
+        b := str.NewBuilder(256)
+        b.Write("INSERT INTO alerts (rule_name, message, severity, timestamp, sensor_id) VALUES ('")
+        b.Write(ruleName)
+        b.Write("','")
+        b.Write(message)
+        b.Write("','")
+        b.Write(severity)
+        b.Write("',")
+        b.Write(fmt.Itoa(alert.timestamp))
+        b.Write(",0)")
+
+        var res db.Result
+        var err error
+        res, err = self.conn.Exec(b.String())
+        return err
+    }
+
+    pub fn GetRecentReadings(self: *DBLogger, limit: int) -> ([]SensorReading, error) {
+        // String-to-number parsing helpers are not currently exposed by the standard
+        // library, so this function returns an empty slice for now.
+        return []SensorReading{}, nil
+    }
+
+    pub fn Close(self: *DBLogger) {
+        self.conn.Close()
+    }
 }

@@ -1,50 +1,52 @@
+module output
+
 import "std/fs"
 import "std/str"
-import "worker"
+import "std/fmt"
 
-fn SaveCSV(results: []worker.Result, path: string) -> error {
-    file, err := fs.Create(path)
-    if err != nil {
-        return err
-    }
-    defer file.Close()
-    
-    // Write header
-    header := "URL,Status,Title,Error,Duration(ms)\n"
-    file.WriteString(header)
-    
-    // Write rows
+pub struct Result {
+    url: string
+    status: int
+    title: string
+    errMsg: string
+    duration: int
+}
+
+pub fn SaveCSV(results: []Result, path: string) -> error {
+    b := str.NewBuilder(1024)
+    b.Write("URL,Status,Title,Error,Duration(ms)\n")
     for i := 0; i < len(results); i = i + 1 {
         r := results[i]
-        line := "{r.url},{r.status},{r.title},{r.error},{r.duration}\n"
-        file.WriteString(line)
+        b.Write(r.url)
+        b.Write(",")
+        b.Write(fmt.Itoa(r.status))
+        b.Write(",")
+        b.Write(r.title)
+        b.Write(",")
+        b.Write(r.errMsg)
+        b.Write(",")
+        b.Write(fmt.Itoa(r.duration))
+        b.Write("\n")
     }
-    
-    return nil
+    return fs.WriteAll(path, b.String())
 }
 
-fn SaveJSON(results: []worker.Result, path: string) -> error {
-    file, err := fs.Create(path)
-    if err != nil {
-        return err
-    }
-    defer file.Close()
-    
-    // Simple JSON output
-    json := "[\n"
+pub fn SaveJSON(results: []Result, path: string) -> error {
+    b := str.NewBuilder(1024)
+    b.Write("[\n")
     for i := 0; i < len(results); i = i + 1 {
         if i > 0 {
-            json += ",\n"
+            b.Write(",\n")
         }
-        json += "  {\"url\": \"result\"}\n"
+        b.Write("  {\"url\": \"")
+        b.Write(results[i].url)
+        b.Write("\"}")
     }
-    json += "]\n"
-    
-    file.WriteString(json)
-    return nil
+    b.Write("\n]\n")
+    return fs.WriteAll(path, b.String())
 }
 
-fn PrintSummary(results: []worker.Result) {
+pub fn PrintSummary(results: []Result) {
     total := len(results)
     print("\n=== Scraping Summary ===")
     print("Total URLs: {total}")
