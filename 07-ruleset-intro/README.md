@@ -13,13 +13,20 @@ This example shows how to use Skink's `ruleset` and `rule` language features, pl
 
 `ClimateRules` watches a global `currentTemp` variable. Three static rules fire when the temperature is high, low, or normal.
 
-`SensorSource` is a dynamic rule source. It implements `RuleSource` by providing `name`, `start`, `stop`, `triggered`, `Action`, and `Priority` methods. It is registered with the ruleset via:
+`SensorSource` is a dynamic rule source. Its methods are defined inside the struct so the compiler emits the qualified names the ruleset wrapper expects. It implements `RuleSource` by providing `name`, `start`, `stop`, `triggered`, `Action`, and `Priority` methods. It is registered with the ruleset via:
 
 ```skink
 ClimateRules.registerRule(&src)
 ```
 
 The ruleset background loop evaluates all rules every millisecond. The program sets `currentTemp` and the sensor `reading` a few times, lets the loop run, then stops the ruleset.
+
+Ruleset lifecycle methods:
+
+- `ClimateRules.start()` — start the background evaluation loop
+- `ClimateRules.stop()` — stop the loop
+- `ClimateRules.restart()` — stop then start again
+- `ClimateRules.reset()` — clear all registered rules
 
 ## Running
 
