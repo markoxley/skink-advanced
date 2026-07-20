@@ -1,0 +1,142 @@
+// Distributed system skeleton for Skink.
+//
+// Demonstrates how the same binary can use:
+//   - SQLite (std/db) for local storage
+//   - MQTT (std/mqtt) for inter-node messaging
+//   - RuleSets (std/rules) for event-driven logic
+//   - Trainable LSTM (std/tensor) for reinforcement-learning decisions
+//   - Concurrency primitives (std/sync, std/time)
+//
+// Run: SKINK_HOME=/path/to/skink-lang skink -check main.skink
+
+module main
+
+import "std/db"
+import "std/mqtt"
+import "std/sync"
+import "std/tensor"
+import "std/time"
+
+var temp: float = 20.0
+
+ruleset ClimateRules {
+    rule hot when temp > 30.0 {
+        action: { print("too hot") }
+        priority: 1
+    }
+
+    rule cold when temp < 10.0 {
+        action: { print("too cold") }
+        priority: 2
+    }
+}
+
+struct SensorSource {
+    mu: *sync.Mutex
+    reading: float
+    threshold: float
+
+    pub fn NewSensorSource(threshold: float) -> SensorSource {
+        return SensorSource{
+            mu: sync.NewMutex(),
+            reading: 0.0,
+            threshold: threshold,
+        }
+    }
+
+    pub fn SetReading(self: *SensorSource, r: float) {
+        self.mu.Lock()
+        self.reading = r
+        self.mu.Unlock()
+    }
+
+    pub fn name(self: *SensorSource) -> string { return "sensor" }
+    pub fn start(self: *SensorSource) {}
+    pub fn stop(self: *SensorSource) {}
+
+    pub fn triggered(self: *SensorSource) -> bool {
+        self.mu.Lock()
+        r := self.reading
+        self.mu.Unlock()
+        return r > self.threshold
+    }
+
+    pub fn Action(self: *SensorSource) {
+        print("sensor source triggered")
+    }
+
+    pub fn Priority(self: *SensorSource) -> int {
+        return 5
+    }
+}
+
+fn main() -> int {
+    // --- SQLite backend ---
+    conn, dberr := db.Open("sqlite3", ":memory:")
+    if dberr.message != "" {
+        print("db open failed: {dberr.message}")
+        return 1
+    }
+    res1, err1 := conn.Exec("CREATE TABLE readings (id INTEGER PRIMARY KEY, value REAL)")
+    if err1.message != "" {
+        print("db create failed: {err1.message}")
+        return 1
+    }
+    if res1.affected != 0 {
+        print("db create affected rows should be 0")
+        return 1
+    }
+    res2, err2 := conn.Exec("INSERT INTO readings (value) VALUES (25.0)")
+    if err2.message != "" {
+        print("db insert failed: {err2.message}")
+        return 1
+    }
+    if res2.affected != 1 {
+        print("db insert should affect 1 row")
+        return 1
+    }
+
+    // --- RuleSet logic ---
+    src := SensorSource.NewSensorSource(50.0)
+    ClimateRules.registerRule(&src)
+    ClimateRules.start()
+    src.SetReading(60.0)
+    time.SleepMs(50)
+    ClimateRules.stop()
+
+    // --- MQTT inter-node messaging (best-effort on public broker) ---
+    client, merr := mqtt.NewClient("skink_node", "test.mosquitto.org", 1883)
+    if merr.message != "" {
+        print("mqtt new client failed: {merr.message}")
+        return 1
+    }
+    cerr := client.Connect()
+    if cerr.message != "" {
+        print("mqtt connect failed: {cerr.message}")
+    } else {
+        perr := client.Publish("skink/demo", "hello from skink", 0)
+        if perr.message != "" {
+            print("mqtt publish failed: {perr.message}")
+        }
+        serr := client.Subscribe("skink/in", 0)
+        if serr.message != "" {
+            print("mqtt subscribe failed: {serr.message}")
+        }
+        lerr := client.Loop(2)
+        if lerr.message != "" {
+            print("mqtt loop failed: {lerr.message}")
+        }
+    }
+    mqtt.Cleanup()
+
+    // --- RL-ready LSTM decision cell ---
+    cell := tensor.NewLSTMCell(2, 4)
+    input := tensor.Ones([1, 2])
+    h := tensor.Zeros([1, 4])
+    c := tensor.Zeros([1, 4])
+    target := tensor.Ones([1, 4])
+    _, _, loss := cell.TrainStep(input, h, c, target, 0.1)
+    print("lstm loss: {loss}")
+
+    return 0
+}
