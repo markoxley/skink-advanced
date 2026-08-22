@@ -1,1 +1,26 @@
 /std
+
+# Build artifacts
+*.ll
+*.o
+*.bc
+*.exe
+
+# Test scratch dirs
+.skink-rt-*/
+.skink-test-*/
+
+# Compiled binaries (project-specific)
+*/ruleset_intro
+*/self_hosting_lexer
+*/self_hosting_parser
+
+# Backup files
+*.bak
+*.orig
+*.swp
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db

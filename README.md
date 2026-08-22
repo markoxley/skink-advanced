@@ -4,7 +4,7 @@ A collection of comprehensive, real-world projects demonstrating the full power 
 
 ## Overview
 
-This repository contains six complete projects that go beyond simple examples to demonstrate how Skink can be used to build production-grade applications. Each project includes:
+This repository contains ten complete projects that go beyond simple examples to demonstrate how Skink can be used to build production-grade applications. Each project includes:
 
 - Complete implementation with multiple modules
 - Detailed documentation and architecture diagrams
@@ -18,21 +18,21 @@ This repository contains six complete projects that go beyond simple examples to
 
 **Location:** `01-llm-web-app/`
 
-A full-stack application demonstrating local LLM inference, web framework, middleware patterns, and file logging.
+A full-stack application demonstrating local LLM inference, HTTP networking, JSON API endpoints, and file logging.
 
 **Key Features:**
 - Local LLM inference using `std/llm` (no cloud dependencies)
-- Web server with `std/web` framework
-- Request/response middleware for logging
-- Thread-safe file logging with `std/sync`
-- Concurrent chat session handling
+- HTTP server with `std/net`
+- Request/response handling and JSON responses
+- File logging with `std/fs`
+- Fallback demo mode when model weights are not present
 
 **Skink Features:**
 - `std/llm` - Local LLM inference
-- `std/web` - HTTP server and routing
+- `std/net` - HTTP server and TCP networking
+- `std/json` - JSON serialization and parsing
 - `std/fs` - File I/O
-- `std/sync` - Mutex for thread safety
-- Middleware pattern implementation
+- Structs and method implementation
 
 **Use Case:** Building AI-powered web applications with local inference
 
@@ -145,17 +145,102 @@ A distributed system demonstrating service-oriented architecture, RPC communicat
 - Service definitions with `service` keyword
 - Typed channel-based RPC
 - Multiple interconnected services
-- API gateway for request routing
 - Service composition and orchestration
 
 **Skink Features:**
 - `service` keyword - Service-oriented architecture
 - Service implementation with `service for`
 - RPC communication over typed channels
-- `std/web` - HTTP server and API gateway
 - `std/sync` - Thread-safe service state
 
 **Use Case:** Building distributed microservices architectures
+
+---
+
+### 7. Ruleset Introduction
+
+**Location:** `07-ruleset-intro/`
+
+An introductory example demonstrating Skink's reactive ruleset engine, showing how to define rules with conditions, actions, and priorities.
+
+**Key Features:**
+- Ruleset definitions with `ruleset` keyword
+- Rule conditions (`when`) and actions
+- Priority-based rule execution
+- Custom rule sources
+
+**Skink Features:**
+- `std/rules` - Reactive ruleset engine
+- `ruleset` keyword for event-driven logic
+- Rule priorities and conflict resolution
+
+**Use Case:** Learning the ruleset engine for reactive programming
+
+---
+
+### 8. Distributed System
+
+**Location:** `08-distributed-system/`
+
+A distributed system example demonstrating node communication, consensus patterns, and fault-tolerant design using Skink's concurrency primitives.
+
+**Key Features:**
+- Node-to-node communication
+- Consensus and leader election
+- Fault tolerance patterns
+- Concurrent state management
+
+**Skink Features:**
+- `spawn` for goroutines
+- Channels for inter-node communication
+- `std/sync` for thread-safe state
+- Rulesets for reactive node behavior
+
+**Use Case:** Building fault-tolerant distributed systems
+
+---
+
+### 9. Self-Hosting Lexer
+
+**Location:** `09-self-hosting-lexer/`
+
+A Skink lexer written in Skink itself, proving the language can handle real-world tokenization tasks. Successfully lexes all stdlib files.
+
+**Key Features:**
+- Complete lexer implementation in Skink
+- Token types for all Skink syntax
+- String and comment lexing
+- Error reporting
+
+**Skink Features:**
+- String manipulation with `std/str`
+- Character classification
+- Custom structs and enums
+- Pattern matching
+
+**Use Case:** Proving Skink's self-hosting capability for tooling
+
+---
+
+### 10. Self-Hosting Parser
+
+**Location:** `10-self-hosting-parser/`
+
+A Skink parser written in Skink itself, building on the self-hosting lexer to parse Skink source code into an AST.
+
+**Key Features:**
+- Recursive descent parser in Skink
+- AST node definitions
+- Expression and statement parsing
+- Type annotation parsing
+
+**Skink Features:**
+- Tagged unions for AST nodes
+- Pattern matching for node dispatch
+- Self-referential types
+- Module imports
+
+**Use Case:** Proving Skink's self-hosting capability for compiler tooling
 
 ---
 
@@ -163,7 +248,7 @@ A distributed system demonstrating service-oriented architecture, RPC communicat
 
 ### Prerequisites
 
-- Skink compiler (version 0.1 or later)
+- Skink compiler: install via `curl -fsSL http://skink-lang.uk/install.sh | bash`
 - Required external dependencies vary by project (see individual project READMEs)
 
 ### Running a Project
@@ -172,9 +257,8 @@ Each project is self-contained and can be run independently:
 
 ```bash
 cd 01-llm-web-app
-# Follow project-specific setup instructions in README.md
-skink build main.skink
-./main
+skink code/main.skink
+./code/main
 ```
 
 ## Skink Features Demonstrated
@@ -192,11 +276,11 @@ Across all projects, the following Skink features are demonstrated:
 - **`std/llm`**: Local LLM inference
 - **`std/mcp`**: Model Context Protocol server
 - **`std/tensor`**: Tensor operations and neural networks
-- **`std/web`**: HTTP server and web framework
 - **`std/mqtt`**: MQTT client for IoT
 - **`std/rules`**: Reactive ruleset engine
 - **`std/db`**: SQLite database
-- **`std/net`**: HTTP client
+- **`std/net`**: HTTP client and TCP networking
+- **`std/json`**: JSON parsing and serialization
 - **`std/fs`**: File system operations
 - **`std/sync`**: Concurrency primitives (mutex, waitgroup)
 - **`std/str`**: String manipulation
@@ -235,18 +319,5 @@ All projects in this repository are licensed under the Apache License 2.0, consi
 
 ## Additional Resources
 
-- [Skink Language Website](https://skink-lang.org)
-- [Skink Manual](https://skink-lang.org/manual.html)
-- [Skink GitHub Repository](https://github.com/markoxley/skink-lang)
-- [Skink VS Code Extension](https://github.com/markoxley/skink-vscode)
-
-## Project Ideas for Future Addition
-
-- Real-time chat application with WebSockets
-- Blockchain implementation
-- Game server with multiplayer support
-- Data pipeline with ETL operations
-- Computer vision application
-- Distributed file system
-- Container orchestration system
-- Build system and package manager
+- [Skink Language Website](http://skink-lang.uk)
+- [Skink GitHub Repository](https://github.com/skink-lang/skink)

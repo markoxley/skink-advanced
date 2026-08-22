@@ -1,0 +1,754 @@
+// Test program for the Skink parser written in Skink.
+// Reads a file, lexes it, parses it, and prints an AST summary.
+module main
+
+import "std/str"
+import "std/lexer"
+import "std/parser"
+import "std/ast"
+import "std/buf"
+
+// C stdio functions for file reading.
+extern fn fopen(path: string, mode: string) -> int64
+extern fn fclose(fp: int64) -> int
+extern fn fread(buf: string, size: int, count: int, fp: int64) -> int
+extern fn fseek(fp: int64, offset: int64, whence: int) -> int
+extern fn ftell(fp: int64) -> int64
+
+// Runtime command-line argument access.
+extern fn _skink_runtime_get_argc() -> int
+extern fn _skink_runtime_get_argv() -> []string
+
+// readFile reads the entire contents of a file into a string.
+fn readFile(path: string) -> string {
+    fp := fopen(path, "r")
+    if fp == 0 {
+        return ""
+    }
+    fseek(fp, int64(0), 2)
+    size := ftell(fp)
+    fseek(fp, int64(0), 0)
+    count := int(size)
+    if count <= 0 {
+        fclose(fp)
+        return ""
+    }
+    buf := str.Repeat(" ", count)
+    n := fread(buf, 1, count, fp)
+    fclose(fp)
+    if n <= 0 {
+        return ""
+    }
+    return str.Substr(buf, 0, n)
+}
+
+// printAST prints a summary of the parsed AST.
+fn printAST(decls: []ast.Stmt, indent: int) {
+    n := len(decls)
+    for i := 0; i < n; i = i + 1 {
+        printStmt(decls[i], indent)
+    }
+}
+
+fn indentStr(n: int) -> string {
+    s := ""
+    for i := 0; i < n; i = i + 1 {
+        s = str.Concat(s, "  ")
+    }
+    return s
+}
+
+fn printStmt(s: ast.Stmt, indent: int) {
+    ind := indentStr(indent)
+    kind := s.kind
+
+    if kind == ast.ST_MODULE {
+        print(str.Concat(ind, str.Concat("module ", s.decl.moduleName)))
+        return
+    }
+    if kind == ast.ST_IMPORT {
+        line := str.Concat(ind, str.Concat("import \"", str.Concat(s.decl.importPath, "\"")))
+        if str.Len(s.decl.importAlias) > 0 {
+            line = str.Concat(line, str.Concat(" as ", s.decl.importAlias))
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_FN {
+        d := s.decl
+        line := str.Concat(ind, str.Concat("fn ", d.fnName))
+        line = str.Concat(line, "(")
+        np := len(d.fnParams)
+        for j := 0; j < np; j = j + 1 {
+            if j > 0 {
+                line = str.Concat(line, ", ")
+            }
+            line = str.Concat(line, str.Concat(d.fnParams[j].name, str.Concat(": ", ast.typeString(ast.typeOpt(d.fnParams[j].typ)))))
+        }
+        line = str.Concat(line, ")")
+        nr := len(d.fnRetTypes)
+        if nr > 0 {
+            line = str.Concat(line, " -> ")
+            if nr > 1 {
+                line = str.Concat(line, "(")
+            }
+            for j := 0; j < nr; j = j + 1 {
+                if j > 0 {
+                    line = str.Concat(line, ", ")
+                }
+                line = str.Concat(line, ast.typeString(d.fnRetTypes[j]))
+            }
+            if nr > 1 {
+                line = str.Concat(line, ")")
+            }
+        }
+        if d.fnIsPub {
+            line = str.Concat("pub ", line)
+        }
+        print(line)
+        printStmts(d.fnBody, indent + 1)
+        return
+    }
+    if kind == ast.ST_STRUCT {
+        d := s.decl
+        line := str.Concat(ind, str.Concat("struct ", d.structName))
+        if d.structIsPub {
+            line = str.Concat("pub ", line)
+        }
+        print(line)
+        nf := len(d.structFields)
+        for j := 0; j < nf; j = j + 1 {
+            f := d.structFields[j]
+            fl := str.Concat(indentStr(indent + 1), str.Concat(f.name, str.Concat(": ", ast.typeString(ast.typeOpt(f.typ)))))
+            if f.isPub {
+                fl = str.Concat("pub ", fl)
+            }
+            print(fl)
+        }
+        return
+    }
+    if kind == ast.ST_ENUM {
+        d := s.decl
+        line := str.Concat(ind, str.Concat("enum ", d.enumName))
+        if d.enumIsPub {
+            line = str.Concat("pub ", line)
+        }
+        print(line)
+        nv := len(d.enumVariants)
+        for j := 0; j < nv; j = j + 1 {
+            v := d.enumVariants[j]
+            vl := str.Concat(indentStr(indent + 1), v.name)
+            np := len(v.payloads)
+            if np > 0 {
+                vl = str.Concat(vl, "(")
+                for k := 0; k < np; k = k + 1 {
+                    if k > 0 {
+                        vl = str.Concat(vl, ", ")
+                    }
+                    vl = str.Concat(vl, ast.typeString(v.payloads[k]))
+                }
+                vl = str.Concat(vl, ")")
+            }
+            print(vl)
+        }
+        return
+    }
+    if kind == ast.ST_CONST {
+        d := s.decl
+        if len(d.constBlock) > 0 {
+            print(str.Concat(ind, "const {"))
+            nb := len(d.constBlock)
+            for j := 0; j < nb; j = j + 1 {
+                item := d.constBlock[j]
+                print(str.Concat(indentStr(indent + 1), str.Concat(item.name, " = ...")))
+            }
+            print(str.Concat(ind, "}"))
+        } else {
+            print(str.Concat(ind, str.Concat("const ", str.Concat(d.constName, " = ..."))))
+        }
+        return
+    }
+    if kind == ast.ST_VARDECL {
+        line := str.Concat(ind, str.Concat("var ", s.varName))
+        if ast.hasType(s.varType) {
+            line = str.Concat(line, str.Concat(": ", ast.typeString(ast.typeOpt(s.varType))))
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_TYPEALIAS {
+        d := s.decl
+        print(str.Concat(ind, str.Concat("type ", str.Concat(d.aliasName, str.Concat(" = ", ast.typeString(ast.typeOpt(d.aliasType)))))))
+        return
+    }
+    if kind == ast.ST_EXTERN {
+        d := s.decl
+        line := str.Concat(ind, str.Concat("extern fn ", d.fnName))
+        line = str.Concat(line, "(")
+        np := len(d.fnParams)
+        for j := 0; j < np; j = j + 1 {
+            if j > 0 {
+                line = str.Concat(line, ", ")
+            }
+            line = str.Concat(line, str.Concat(d.fnParams[j].name, str.Concat(": ", ast.typeString(ast.typeOpt(d.fnParams[j].typ)))))
+        }
+        line = str.Concat(line, ")")
+        nr := len(d.fnRetTypes)
+        if nr > 0 {
+            line = str.Concat(line, " -> ")
+            for j := 0; j < nr; j = j + 1 {
+                if j > 0 {
+                    line = str.Concat(line, ", ")
+                }
+                line = str.Concat(line, ast.typeString(d.fnRetTypes[j]))
+            }
+        }
+        print(line)
+        return
+    }
+
+    printStmt2(s, indent)
+}
+
+fn printStmts(stmts: []ast.Stmt, indent: int) {
+    n := len(stmts)
+    for i := 0; i < n; i = i + 1 {
+        printStmt2(stmts[i], indent)
+    }
+}
+
+fn printStmt2(s: ast.Stmt, indent: int) {
+    ind := indentStr(indent)
+    kind := s.kind
+
+    if kind == ast.ST_VAR {
+        // Multi-value: a, b := x, y
+        if len(s.varNames) > 0 {
+            line := str.Concat(ind, "")
+            n := len(s.varNames)
+            for i := 0; i < n; i = i + 1 {
+                if i > 0 {
+                    line = str.Concat(line, ", ")
+                }
+                line = str.Concat(line, s.varNames[i])
+            }
+            line = str.Concat(line, " := ")
+            vn := len(s.varValue)
+            for i := 0; i < vn; i = i + 1 {
+                if i > 0 {
+                    line = str.Concat(line, ", ")
+                }
+                line = str.Concat(line, exprSummary(s.varValue[i]))
+            }
+            print(line)
+            return
+        }
+        // Single value: x := expr
+        line := str.Concat(ind, str.Concat(s.varName, " := "))
+        if ast.hasExpr(s.varValue) {
+            line = str.Concat(line, exprSummary(s.varValue[0]))
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_ASSIGN {
+        line := str.Concat(ind, "?")
+        if ast.hasExpr(s.assignTarget) {
+            line = str.Concat(ind, exprSummary(s.assignTarget[0]))
+        }
+        line = str.Concat(line, str.Concat(" ", str.Concat(s.assignOp, " ")))
+        if ast.hasExpr(s.assignValue) {
+            line = str.Concat(line, exprSummary(s.assignValue[0]))
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_TUPLEASSIGN {
+        line := str.Concat(ind, "")
+        n := len(s.tupleTargets)
+        for i := 0; i < n; i = i + 1 {
+            if i > 0 {
+                line = str.Concat(line, ", ")
+            }
+            line = str.Concat(line, exprSummary(s.tupleTargets[i]))
+        }
+        line = str.Concat(line, str.Concat(" ", str.Concat(s.assignOp, " ")))
+        vn := len(s.assignValue)
+        for i := 0; i < vn; i = i + 1 {
+            if i > 0 {
+                line = str.Concat(line, ", ")
+            }
+            line = str.Concat(line, exprSummary(s.assignValue[i]))
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_RETURN {
+        line := str.Concat(ind, "return")
+        nr := len(s.returnValues)
+        for j := 0; j < nr; j = j + 1 {
+            line = str.Concat(line, str.Concat(" ", exprSummary(s.returnValues[j])))
+            if j < nr - 1 {
+                line = str.Concat(line, ",")
+            }
+        }
+        print(line)
+        return
+    }
+    if kind == ast.ST_BREAK {
+        print(str.Concat(ind, "break"))
+        return
+    }
+    if kind == ast.ST_CONTINUE {
+        print(str.Concat(ind, "continue"))
+        return
+    }
+    if kind == ast.ST_IF {
+        if ast.hasExpr(s.cond) {
+            print(str.Concat(ind, str.Concat("if ", exprSummary(s.cond[0]))))
+        } else {
+            print(str.Concat(ind, "if"))
+        }
+        printStmts(s.thenBody, indent + 1)
+        if len(s.elseBody) > 0 {
+            print(str.Concat(ind, "else"))
+            printStmts(s.elseBody, indent + 1)
+        }
+        return
+    }
+    if kind == ast.ST_FOR {
+        if str.Len(s.forIterVar) > 0 {
+            if ast.hasExpr(s.forIterExpr) {
+                print(str.Concat(ind, str.Concat("for ", str.Concat(s.forIterVar, str.Concat(" in ", exprSummary(s.forIterExpr[0]))))))
+            } else {
+                print(str.Concat(ind, str.Concat("for ", s.forIterVar)))
+            }
+        } else if ast.hasStmt(s.forInit) {
+            // C-style for: init; cond; post
+            line := str.Concat(ind, "for ")
+            line = str.Concat(line, stmtSummary(ast.stmtOpt(s.forInit)))
+            line = str.Concat(line, "; ")
+            if ast.hasExpr(s.cond) {
+                line = str.Concat(line, exprSummary(s.cond[0]))
+            }
+            line = str.Concat(line, "; ")
+            if ast.hasStmt(s.forPost) {
+                line = str.Concat(line, stmtSummary(ast.stmtOpt(s.forPost)))
+            }
+            print(line)
+        } else if ast.hasExpr(s.cond) {
+            print(str.Concat(ind, str.Concat("for ", exprSummary(s.cond[0]))))
+        } else {
+            print(str.Concat(ind, "for"))
+        }
+        printStmts(s.thenBody, indent + 1)
+        return
+    }
+    if kind == ast.ST_WHILE {
+        if ast.hasExpr(s.cond) {
+            print(str.Concat(ind, str.Concat("while ", exprSummary(s.cond[0]))))
+        } else {
+            print(str.Concat(ind, "while"))
+        }
+        printStmts(s.thenBody, indent + 1)
+        return
+    }
+    if kind == ast.ST_UNTIL {
+        if ast.hasExpr(s.cond) {
+            print(str.Concat(ind, str.Concat("until ", exprSummary(s.cond[0]))))
+        } else {
+            print(str.Concat(ind, "until"))
+        }
+        printStmts(s.thenBody, indent + 1)
+        return
+    }
+    if kind == ast.ST_DEFER {
+        print(str.Concat(ind, "defer"))
+        if ast.hasStmt(s.deferStmt) {
+            printStmt2(ast.stmtOpt(s.deferStmt), indent + 1)
+        }
+        return
+    }
+    if kind == ast.ST_EXPR {
+        if ast.hasExpr(s.expr) {
+            print(str.Concat(ind, exprSummary(s.expr[0])))
+        }
+        return
+    }
+    if kind == ast.ST_BLOCK {
+        print(str.Concat(ind, "{"))
+        printStmts(s.thenBody, indent + 1)
+        print(str.Concat(ind, "}"))
+        return
+    }
+    if kind == ast.ST_MATCH {
+        if ast.hasExpr(s.matchSubject) {
+            print(str.Concat(ind, str.Concat("match ", exprSummary(s.matchSubject[0]))))
+        } else {
+            print(str.Concat(ind, "match"))
+        }
+        na := len(s.matchArms)
+        for j := 0; j < na; j = j + 1 {
+            arm := s.matchArms[j]
+            if arm.isWildcard {
+                print(str.Concat(indentStr(indent + 1), "_ =>"))
+            } else {
+                print(str.Concat(indentStr(indent + 1), str.Concat(patternStr(arm.pattern), " =>")))
+            }
+            printStmts(arm.body, indent + 2)
+        }
+        return
+    }
+
+    print(str.Concat(ind, ast.stmtKindName(kind)))
+}
+
+// stmtSummary returns a one-line summary of a simple statement (for for-init/post).
+fn stmtSummary(s: ast.Stmt) -> string {
+    if s.kind == ast.ST_VAR {
+        line := str.Concat(s.varName, " := ")
+        if ast.hasExpr(s.varValue) {
+            line = str.Concat(line, exprSummary(s.varValue[0]))
+        }
+        return line
+    }
+    if s.kind == ast.ST_ASSIGN {
+        line := "?"
+        if ast.hasExpr(s.assignTarget) {
+            line = exprSummary(s.assignTarget[0])
+        }
+        line = str.Concat(line, str.Concat(" ", str.Concat(s.assignOp, " ")))
+        if ast.hasExpr(s.assignValue) {
+            line = str.Concat(line, exprSummary(s.assignValue[0]))
+        }
+        return line
+    }
+    if s.kind == ast.ST_EXPR {
+        if ast.hasExpr(s.expr) {
+            return exprSummary(s.expr[0])
+        }
+    }
+    return "?"
+}
+
+// typeSummary returns a one-line summary of a type.
+fn typeSummary(t: ast.Type) -> string {
+    if t.kind == ast.TY_NAMED {
+        return t.name
+    }
+    if t.kind == ast.TY_POINTER {
+        if ast.hasType(t.elem) {
+            return str.Concat("*", typeSummary(t.elem[0]))
+        }
+        return "*"
+    }
+    if t.kind == ast.TY_ARRAY {
+        if ast.hasType(t.elem) {
+            return str.Concat("[]", typeSummary(t.elem[0]))
+        }
+        return "[]"
+    }
+    return "?"
+}
+
+// exprSummary returns a one-line summary of an expression.
+fn exprSummary(e: ast.Expr) -> string {
+    if e.kind == 0 {
+        return "?"
+    }
+    if e.kind == ast.EX_IDENT {
+        return e.ident
+    }
+    if e.kind == ast.EX_INT {
+        b := buf.NewBuffer()
+        b.WriteInt(e.intVal)
+        s := b.String()
+        b.Free()
+        return s
+    }
+    if e.kind == ast.EX_FLOAT {
+        return e.strVal
+    }
+    if e.kind == ast.EX_STRING {
+        return str.Concat("\"", str.Concat(e.strVal, "\""))
+    }
+    if e.kind == ast.EX_BOOL {
+        if e.boolVal {
+            return "true"
+        }
+        return "false"
+    }
+    if e.kind == ast.EX_NIL {
+        return "nil"
+    }
+    if e.kind == ast.EX_PREFIX {
+        if ast.hasExpr(e.prefixRight) {
+            return str.Concat(e.prefixOp, exprSummary(e.prefixRight[0]))
+        }
+        return e.prefixOp
+    }
+    if e.kind == ast.EX_INFIX {
+        left := "?"
+        right := "?"
+        if ast.hasExpr(e.infixLeft) {
+            left = exprSummary(e.infixLeft[0])
+        }
+        if ast.hasExpr(e.infixRight) {
+            right = exprSummary(e.infixRight[0])
+        }
+        return str.Concat(left, str.Concat(" ", str.Concat(e.infixOp, str.Concat(" ", right))))
+    }
+    if e.kind == ast.EX_CALL {
+        fnName := "?"
+        if ast.hasExpr(e.callFunc) {
+            fnName = exprSummary(e.callFunc[0])
+        }
+        s := str.Concat(fnName, "(")
+        n := len(e.callArgs)
+        for i := 0; i < n; i = i + 1 {
+            if i > 0 {
+                s = str.Concat(s, ", ")
+            }
+            s = str.Concat(s, exprSummary(e.callArgs[i]))
+        }
+        s = str.Concat(s, ")")
+        return s
+    }
+    if e.kind == ast.EX_INDEX {
+        target := "?"
+        idx := "?"
+        if ast.hasExpr(e.indexTarget) {
+            target = exprSummary(e.indexTarget[0])
+        }
+        if ast.hasExpr(e.indexExpr) {
+            idx = exprSummary(e.indexExpr[0])
+        }
+        return str.Concat(target, str.Concat("[", str.Concat(idx, "]")))
+    }
+    if e.kind == ast.EX_FIELD {
+        target := "?"
+        if ast.hasExpr(e.fieldTarget) {
+            target = exprSummary(e.fieldTarget[0])
+        }
+        return str.Concat(target, str.Concat(".", e.fieldName))
+    }
+    if e.kind == ast.EX_ARRAY_LIT {
+        s := "["
+        // Typed composite literal: []Type{...}
+        if ast.hasType(e.arrayType) {
+            s = str.Concat(s, str.Concat("]", typeSummary(e.arrayType[0])))
+            s = str.Concat(s, "{")
+        }
+        n := len(e.arrayElems)
+        for i := 0; i < n; i = i + 1 {
+            if i > 0 {
+                s = str.Concat(s, ", ")
+            }
+            s = str.Concat(s, exprSummary(e.arrayElems[i]))
+        }
+        if ast.hasType(e.arrayType) {
+            s = str.Concat(s, "}")
+        } else {
+            s = str.Concat(s, "]")
+        }
+        return s
+    }
+    if e.kind == ast.EX_PAREN {
+        if ast.hasExpr(e.inner) {
+            return str.Concat("(", str.Concat(exprSummary(e.inner[0]), ")"))
+        }
+        return "(?)"
+    }
+    if e.kind == ast.EX_SLICE {
+        target := "?"
+        if ast.hasExpr(e.sliceTarget) {
+            target = exprSummary(e.sliceTarget[0])
+        }
+        s := str.Concat(target, "[")
+        if ast.hasExpr(e.sliceLow) {
+            s = str.Concat(s, exprSummary(e.sliceLow[0]))
+        }
+        s = str.Concat(s, ":")
+        if ast.hasExpr(e.sliceHigh) {
+            s = str.Concat(s, exprSummary(e.sliceHigh[0]))
+        }
+        s = str.Concat(s, "]")
+        return s
+    }
+    if e.kind == ast.EX_MAKE {
+        s := str.Concat("make(", ast.typeString(ast.typeOpt(e.makeType)))
+        if ast.hasExpr(e.makeSize) {
+            s = str.Concat(s, str.Concat(", ", exprSummary(e.makeSize[0])))
+        }
+        s = str.Concat(s, ")")
+        return s
+    }
+    if e.kind == ast.EX_RANGE {
+        low := "?"
+        high := "?"
+        if ast.hasExpr(e.rangeLow) {
+            low = exprSummary(e.rangeLow[0])
+        }
+        if ast.hasExpr(e.rangeHigh) {
+            high = exprSummary(e.rangeHigh[0])
+        }
+        return str.Concat(low, str.Concat("..", high))
+    }
+    if e.kind == ast.EX_ERROR_PROP {
+        if ast.hasExpr(e.postfixTarget) {
+            return str.Concat(exprSummary(e.postfixTarget[0]), "?")
+        }
+        return "?"
+    }
+    if e.kind == ast.EX_NONNULL {
+        if ast.hasExpr(e.postfixTarget) {
+            return str.Concat(exprSummary(e.postfixTarget[0]), "!")
+        }
+        return "?"
+    }
+    if e.kind == ast.EX_FROM_END {
+        target := "?"
+        idx := "?"
+        if ast.hasExpr(e.indexTarget) {
+            target = exprSummary(e.indexTarget[0])
+        }
+        if ast.hasExpr(e.indexExpr) {
+            idx = exprSummary(e.indexExpr[0])
+        }
+        return str.Concat(target, str.Concat("[^", str.Concat(idx, "]")))
+    }
+    if e.kind == ast.EX_SIZEOF {
+        return str.Concat("sizeof(", str.Concat(ast.typeString(ast.typeOpt(e.sizeofType)), ")"))
+    }
+    if e.kind == ast.EX_ALIGNOF {
+        return str.Concat("alignof(", str.Concat(ast.typeString(ast.typeOpt(e.sizeofType)), ")"))
+    }
+    if e.kind == ast.EX_STRUCT_LIT {
+        s := str.Concat(e.structLitName, "{")
+        n := len(e.structLitFields)
+        for i := 0; i < n; i = i + 1 {
+            if i > 0 {
+                s = str.Concat(s, ", ")
+            }
+            val := "?"
+            if ast.hasExpr(e.structLitFields[i].value) {
+                val = exprSummary(e.structLitFields[i].value[0])
+            }
+            s = str.Concat(s, str.Concat(e.structLitFields[i].name, str.Concat(": ", val)))
+        }
+        s = str.Concat(s, "}")
+        return s
+    }
+    if e.kind == ast.EX_FN_LIT {
+        return "fn(...) { ... }"
+    }
+    if e.kind == ast.EX_IF_EXPR {
+        return "if ... else ..."
+    }
+    if e.kind == ast.EX_MATCH_EXPR {
+        return "match ... { ... }"
+    }
+    if e.kind == ast.EX_TUPLE {
+        s := "("
+        n := len(e.tupleElems)
+        for i := 0; i < n; i = i + 1 {
+            if i > 0 {
+                s = str.Concat(s, ", ")
+            }
+            s = str.Concat(s, exprSummary(e.tupleElems[i]))
+        }
+        s = str.Concat(s, ")")
+        return s
+    }
+    return ast.exprKindName(e.kind)
+}
+
+fn patternStr(p: ast.Pattern) -> string {
+    if p.kind == ast.PK_WILDCARD {
+        return "_"
+    }
+    if p.kind == ast.PK_INT {
+        b := buf.NewBuffer()
+        b.WriteInt(p.intVal)
+        s := b.String()
+        b.Free()
+        return s
+    }
+    if p.kind == ast.PK_STRING {
+        return str.Concat("\"", str.Concat(p.strVal, "\""))
+    }
+    if p.kind == ast.PK_BOOL {
+        if p.boolVal {
+            return "true"
+        }
+        return "false"
+    }
+    if p.kind == ast.PK_NIL {
+        return "nil"
+    }
+    if p.kind == ast.PK_VARIANT {
+        s := p.variantName
+        nb := len(p.bindings)
+        if nb > 0 {
+            s = str.Concat(s, "(")
+            for i := 0; i < nb; i = i + 1 {
+                if i > 0 {
+                    s = str.Concat(s, ", ")
+                }
+                s = str.Concat(s, p.bindings[i])
+            }
+            s = str.Concat(s, ")")
+        }
+        return s
+    }
+    if p.kind == ast.PK_IDENT {
+        return p.identName
+    }
+    return "?"
+}
+
+fn main() -> int {
+    argc := _skink_runtime_get_argc()
+    if argc < 2 {
+        print("usage: parser_test <file.skink>")
+        return 1
+    }
+    args := _skink_runtime_get_argv()
+    filename := args[1]
+    data := readFile(filename)
+    if str.Len(data) == 0 {
+        print("error: cannot read file")
+        return 1
+    }
+
+    // Lex the source
+    tokens := lexer.Tokenize(data)
+
+    // Parse the tokens
+    p := parser.New(tokens)
+    decls := parser.ParseFile(&p)
+
+    // Print errors
+    if parser.hasErrors(&p) {
+        errs := parser.Errors(&p)
+        ne := len(errs)
+        print("=== Parse Errors ===")
+        for i := 0; i < ne; i = i + 1 {
+            print(errs[i])
+        }
+        print("")
+    }
+
+    // Print AST summary
+    nd := len(decls)
+    b := buf.NewBuffer()
+    b.WriteString("=== AST Summary (")
+    b.WriteInt(nd)
+    b.WriteString(" declarations) ===")
+    print(b.String())
+    b.Free()
+
+    printAST(decls, 0)
+
+    return 0
+}

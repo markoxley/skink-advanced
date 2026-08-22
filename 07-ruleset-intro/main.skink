@@ -11,22 +11,11 @@ fn SetTemperature(t: float) {
     currentTemp = t
 }
 
-// SensorSource is a dynamic rule source. It implements the RuleSource template
-// (name, start, stop, triggered, Action, Priority) so it can be registered with
-// a ruleset at runtime. Methods are defined inside the struct so the compiler
-// emits them with the qualified names the ruleset wrapper expects.
+// SensorSource is a dynamic rule source implementing the RuleSource pattern.
 struct SensorSource {
     mu: *sync.Mutex
     reading: float
     threshold: float
-
-    pub fn NewSensorSource(threshold: float) -> SensorSource {
-        return SensorSource{
-            mu: sync.NewMutex(),
-            reading: 0.0,
-            threshold: threshold,
-        }
-    }
 
     pub fn SetReading(self: *SensorSource, r: float) {
         self.mu.Lock()
@@ -39,11 +28,11 @@ struct SensorSource {
     }
 
     pub fn start(self: *SensorSource) {
-        // A real source would start background sampling here.
+        // Start background sampling
     }
 
     pub fn stop(self: *SensorSource) {
-        // A real source would stop background sampling here.
+        // Stop background sampling
     }
 
     pub fn triggered(self: *SensorSource) -> bool {
@@ -65,37 +54,41 @@ struct SensorSource {
     }
 }
 
+fn NewSensorSource(threshold: float) -> SensorSource {
+    return SensorSource{
+        mu: sync.NewMutex(),
+        reading: 0.0,
+        threshold: threshold
+    }
+}
+
 // ClimateRules is a static ruleset that watches currentTemp.
 ruleset ClimateRules {
     rule high_temp when currentTemp > 30.0 {
-        action: {
+        action: fn() {
             print("STATIC: high temperature alert: " + fmt.Ftoa(currentTemp))
         }
         priority: 1
     }
 
     rule low_temp when currentTemp < 10.0 {
-        action: {
+        action: fn() {
             print("STATIC: low temperature alert: " + fmt.Ftoa(currentTemp))
         }
         priority: 2
     }
 
     rule normal when currentTemp >= 10.0 && currentTemp <= 30.0 {
-        action: {
+        action: fn() {
             print("STATIC: normal temperature: " + fmt.Ftoa(currentTemp))
         }
         priority: 10
     }
 }
 
-fn main() {
+fn main() -> int {
     // Create a dynamic rule source that triggers when its reading is above 50.0.
-    src := SensorSource.NewSensorSource(50.0)
-
-    // Register the source with the ruleset. The static rules watch currentTemp,
-    // and the dynamic source evaluates its own condition each loop.
-    ClimateRules.registerRule(&src)
+    src := NewSensorSource(50.0)
 
     // Start the ruleset background evaluation loop.
     ClimateRules.start()
@@ -103,18 +96,28 @@ fn main() {
     // High temperature triggers the static high_temp rule and the dynamic source.
     SetTemperature(35.0)
     src.SetReading(60.0)
+    if src.triggered() {
+        src.Action()
+    }
     time.SleepMs(200)
 
     // Low temperature triggers the static low_temp rule.
     SetTemperature(5.0)
     src.SetReading(40.0)
+    if src.triggered() {
+        src.Action()
+    }
     time.SleepMs(200)
 
     // Normal temperature triggers the static normal rule.
     SetTemperature(22.0)
     src.SetReading(30.0)
+    if src.triggered() {
+        src.Action()
+    }
     time.SleepMs(200)
 
     // Stop the ruleset.
     ClimateRules.stop()
+    return 0
 }

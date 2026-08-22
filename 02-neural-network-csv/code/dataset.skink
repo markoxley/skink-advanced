@@ -11,19 +11,19 @@ pub struct Dataset {
     numClasses: int
 }
 
-pub fn LoadIrisDataset(path: string) -> (Dataset, Error) {
+pub fn LoadIrisDataset(path: string) -> (Dataset, errors.Error) {
     parser := csv_parser.NewCSVParser(",")
     rows, err := csv_parser.ParseFile(parser, path)
     if err.message != "" {
-        return Dataset{features: Zeros([0, 0]), labels: Zeros([0, 0]), numClasses: 0}, err
+        return Dataset{features: tensor.Zeros([0, 0]), labels: tensor.Zeros([0, 0]), numClasses: 0}, err
     }
     
     numSamples := len(rows)
     numFeatures := 4
     numClasses := 3
     
-    features := Zeros([numSamples, numFeatures])
-    labels := Zeros([numSamples, numClasses])
+    features := tensor.Zeros([numSamples, numFeatures])
+    labels := tensor.Zeros([numSamples, numClasses])
     
     i := 0
     for i < len(rows) {
@@ -50,5 +50,5 @@ pub fn LoadIrisDataset(path: string) -> (Dataset, Error) {
         features: features,
         labels: labels,
         numClasses: numClasses
-    }, New("")
+    }, errors.New("")
 }

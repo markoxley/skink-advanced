@@ -1,0 +1,95 @@
+// Test program for the Skink lexer.
+// Reads a Skink source file, lexes it, and prints all tokens.
+module main
+
+import "std/lexer"
+import "std/buf"
+import "std/str"
+
+// C stdio functions for file reading.
+extern fn fopen(path: string, mode: string) -> int64
+extern fn fclose(fp: int64) -> int
+extern fn fread(buf: string, size: int, count: int, fp: int64) -> int
+extern fn fseek(fp: int64, offset: int64, whence: int) -> int
+extern fn ftell(fp: int64) -> int64
+
+// Runtime command-line argument access.
+extern fn _skink_runtime_get_argc() -> int
+extern fn _skink_runtime_get_argv() -> []string
+
+// readFile reads the entire contents of a file into a string.
+fn readFile(path: string) -> string {
+    fp := fopen(path, "r")
+    if fp == 0 {
+        return ""
+    }
+    // Seek to end to get size
+    fseek(fp, int64(0), 2) // SEEK_END
+    size := ftell(fp)
+    fseek(fp, int64(0), 0) // SEEK_SET
+    count := int(size)
+    if count <= 0 {
+        fclose(fp)
+        return ""
+    }
+    // Allocate a string buffer of the right size
+    buf := str.Repeat(" ", count)
+    n := fread(buf, 1, count, fp)
+    fclose(fp)
+    if n <= 0 {
+        return ""
+    }
+    return str.Substr(buf, 0, n)
+}
+
+// formatToken returns a human-readable representation of a token.
+fn formatToken(tok: lexer.Token) -> string {
+    b := buf.NewBuffer()
+    b.WriteString("[")
+    b.WriteInt(tok.line)
+    b.WriteString(":")
+    b.WriteInt(tok.col)
+    b.WriteString("] ")
+    b.WriteString(lexer.KindName(tok.kind))
+    if str.Len(tok.literal) > 0 {
+        b.WriteString(" \"")
+        b.WriteString(tok.literal)
+        b.WriteString("\"")
+    }
+    s := b.String()
+    b.Free()
+    return s
+}
+
+fn main() -> int {
+    // Get filename from command line args
+    argc := _skink_runtime_get_argc()
+    if argc < 2 {
+        print("usage: lexer_test <file.skink>")
+        return 1
+    }
+    args := _skink_runtime_get_argv()
+    filename := args[1]
+    data := readFile(filename)
+    if str.Len(data) == 0 {
+        print("error: cannot read file: " + filename)
+        return 1
+    }
+
+    // Lex the source
+    tokens := lexer.Tokenize(data)
+
+    // Print all tokens
+    count := len(tokens)
+    for i := 0; i < count; i = i + 1 {
+        print(formatToken(tokens[i]))
+    }
+
+    // Print token count
+    b := buf.NewBuffer()
+    b.WriteString("Total tokens: ")
+    b.WriteInt(count)
+    print(b.String())
+    b.Free()
+    return 0
+}

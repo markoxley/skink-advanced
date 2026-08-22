@@ -1,11 +1,11 @@
 # LLM Web Application
 
-A complete full-stack application demonstrating Skink's LLM capabilities, networking, and web framework. It serves a chat web frontend, exposes a JSON chat API, and logs requests to a file. Without a GGUF model it runs in demo mode with rule-based responses.
+A complete full-stack application demonstrating Skink's LLM capabilities, networking, and JSON API handling. It serves a chat web frontend, exposes a JSON chat API, and logs requests to a file. Without a GGUF model it runs in demo mode with rule-based responses.
 
 ## Project Overview
 
 - **Local LLM Inference**: Uses `std/llm` to load GGUF models when available
-- **HTTP Server**: Uses `std/net` and `std/web/router` for request handling
+- **HTTP Server**: Uses `std/net` for TCP listening and connection handling
 - **Static Files**: Serves `static/index.html` and related assets
 - **Request Logging**: Writes chat prompts and responses to `app.log`
 - **Demo Mode**: Falls back to keyword-based answers when no model is found
@@ -24,7 +24,7 @@ A complete full-stack application demonstrating Skink's LLM capabilities, networ
 ## Build and Run
 
 ```bash
-SKINK_HOME=/path/to/skink-lang skink code/main.skink
+skink code/main.skink
 ./code/main
 ```
 
@@ -51,6 +51,6 @@ If no model is found, the app prints a message and runs in demo mode.
 
 - `std/llm` for local model loading and text generation
 - `std/net` for TCP listening and connection handling
-- `std/web/router` and `std/web/types` for HTTP routing and request/response types
+- `std/json` for JSON parsing and serialization
 - `std/fs` for file reading and logging
 - Global state, error handling, and struct method calls

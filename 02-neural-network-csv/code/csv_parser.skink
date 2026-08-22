@@ -16,7 +16,7 @@ pub fn NewCSVParser(delimiter: string) -> CSVParser {
     return CSVParser{delimiter: delimiter}
 }
 
-pub fn ParseFile(p: CSVParser, path: string) -> ([]CSVRow, Error) {
+pub fn ParseFile(p: CSVParser, path: string) -> ([]CSVRow, errors.Error) {
     content, err := fs.ReadAll(path)
     if err.message != "" {
         return []CSVRow{}, err
@@ -35,7 +35,7 @@ pub fn ParseFile(p: CSVParser, path: string) -> ([]CSVRow, Error) {
         i = i + 1
     }
     
-    return rows, New("")
+    return rows, errors.New("")
 }
 
 pub fn ParseFloatField(row: CSVRow, index: int) -> float {

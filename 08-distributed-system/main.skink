@@ -7,7 +7,7 @@
 //   - Trainable LSTM (std/tensor) for reinforcement-learning decisions
 //   - Concurrency primitives (std/sync, std/time)
 //
-// Run: SKINK_HOME=/path/to/skink-lang skink -check main.skink
+// Run: skink -check main.skink
 
 module main
 
@@ -21,12 +21,12 @@ var temp: float = 20.0
 
 ruleset ClimateRules {
     rule hot when temp > 30.0 {
-        action: { print("too hot") }
+        action: fn() { print("too hot") }
         priority: 1
     }
 
     rule cold when temp < 10.0 {
-        action: { print("too cold") }
+        action: fn() { print("too cold") }
         priority: 2
     }
 }
@@ -35,14 +35,6 @@ struct SensorSource {
     mu: *sync.Mutex
     reading: float
     threshold: float
-
-    pub fn NewSensorSource(threshold: float) -> SensorSource {
-        return SensorSource{
-            mu: sync.NewMutex(),
-            reading: 0.0,
-            threshold: threshold,
-        }
-    }
 
     pub fn SetReading(self: *SensorSource, r: float) {
         self.mu.Lock()
@@ -70,16 +62,24 @@ struct SensorSource {
     }
 }
 
+fn NewSensorSource(threshold: float) -> SensorSource {
+    return SensorSource{
+        mu: sync.NewMutex(),
+        reading: 0.0,
+        threshold: threshold
+    }
+}
+
 fn main() -> int {
     // --- SQLite backend ---
     conn, dberr := db.Open("sqlite3", ":memory:")
     if dberr.message != "" {
-        print("db open failed: {dberr.message}")
+        print("db open failed: " + dberr.message)
         return 1
     }
     res1, err1 := conn.Exec("CREATE TABLE readings (id INTEGER PRIMARY KEY, value REAL)")
     if err1.message != "" {
-        print("db create failed: {err1.message}")
+        print("db create failed: " + err1.message)
         return 1
     }
     if res1.affected != 0 {
@@ -88,7 +88,7 @@ fn main() -> int {
     }
     res2, err2 := conn.Exec("INSERT INTO readings (value) VALUES (25.0)")
     if err2.message != "" {
-        print("db insert failed: {err2.message}")
+        print("db insert failed: " + err2.message)
         return 1
     }
     if res2.affected != 1 {
@@ -97,46 +97,50 @@ fn main() -> int {
     }
 
     // --- RuleSet logic ---
-    src := SensorSource.NewSensorSource(50.0)
-    ClimateRules.registerRule(&src)
+    src := NewSensorSource(50.0)
     ClimateRules.start()
     src.SetReading(60.0)
+    if src.triggered() {
+        src.Action()
+    }
     time.SleepMs(50)
     ClimateRules.stop()
 
     // --- MQTT inter-node messaging (best-effort on public broker) ---
     client, merr := mqtt.NewClient("skink_node", "test.mosquitto.org", 1883)
     if merr.message != "" {
-        print("mqtt new client failed: {merr.message}")
+        print("mqtt new client failed: " + merr.message)
         return 1
     }
     cerr := client.Connect()
     if cerr.message != "" {
-        print("mqtt connect failed: {cerr.message}")
+        print("mqtt connect failed: " + cerr.message)
     } else {
         perr := client.Publish("skink/demo", "hello from skink", 0)
         if perr.message != "" {
-            print("mqtt publish failed: {perr.message}")
+            print("mqtt publish failed: " + perr.message)
         }
         serr := client.Subscribe("skink/in", 0)
         if serr.message != "" {
-            print("mqtt subscribe failed: {serr.message}")
+            print("mqtt subscribe failed: " + serr.message)
         }
         lerr := client.Loop(2)
         if lerr.message != "" {
-            print("mqtt loop failed: {lerr.message}")
+            print("mqtt loop failed: " + lerr.message)
         }
     }
     mqtt.Cleanup()
 
     // --- RL-ready LSTM decision cell ---
     cell := tensor.NewLSTMCell(2, 4)
-    input := tensor.Ones([1, 2])
-    h := tensor.Zeros([1, 4])
-    c := tensor.Zeros([1, 4])
-    target := tensor.Ones([1, 4])
-    _, _, loss := cell.TrainStep(input, h, c, target, 0.1)
-    print("lstm loss: {loss}")
+    input := tensor.Ones([]int{1, 2})
+    h := tensor.Zeros([]int{1, 4})
+    c := tensor.Zeros([]int{1, 4})
+    target := tensor.Ones([]int{1, 4})
+    stepH, stepC, loss := cell.TrainStep(input, h, c, target, 0.1)
+    if stepH.Shape()[0] > 0 && stepC.Shape()[0] > 0 {
+        print("lstm loss: ", loss)
+    }
 
     return 0
 }

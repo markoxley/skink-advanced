@@ -3,12 +3,68 @@ module main
 import "std/fs"
 import "std/llm"
 import "std/net"
-import "std/web/router"
-import "std/web/types"
+import "std/json"
+import "std/str"
+import "std/libc"
+import "std/errors"
 
-var model: llm.Context
-var hasModel: bool
-var logPath: string
+var model: llm.Context = llm.Context{modelPath: "", nCtx: 0, handle: int64(0)}
+var hasModel: bool = false
+var logPath: string = ""
+
+pub struct Request {
+    method: string
+    path: string
+    query: string
+    headers: map[string]string
+    body: string
+
+    pub fn Path(self: Request) -> string {
+        return self.path
+    }
+
+    pub fn Method(self: Request) -> string {
+        return self.method
+    }
+
+    pub fn Body(self: Request) -> string {
+        return self.body
+    }
+}
+
+pub struct ResponseWriter {
+    status: int
+    headers: map[string]string
+    body: string
+
+    pub fn Status(self: ResponseWriter) -> int {
+        return self.status
+    }
+
+    pub fn ResponseBody(self: ResponseWriter) -> string {
+        return self.body
+    }
+
+    pub fn WriteHeader(self: *ResponseWriter, code: int) {
+        self.status = code
+    }
+
+    pub fn Write(self: *ResponseWriter, text: string) {
+        self.body = str.Concat(self.body, text)
+    }
+
+    pub fn JSON(self: *ResponseWriter, code: int, jsonStr: string) {
+        self.status = code
+        self.headers["Content-Type"] = "application/json"
+        self.body = jsonStr
+    }
+
+    pub fn JSONValue(self: *ResponseWriter, code: int, v: json.Value) {
+        self.status = code
+        self.headers["Content-Type"] = "application/json"
+        self.body = json.MarshalValue(v)
+    }
+}
 
 pub fn intToString(n: int) -> string {
     if n == 0 {
@@ -40,19 +96,23 @@ fn statusText(code: int) -> string {
     return "Unknown"
 }
 
-fn serializeResponse(w: *types.ResponseWriter) -> string {
+fn serializeResponse(w: *ResponseWriter) -> string {
     text := statusText(w.Status())
     body := w.ResponseBody()
     bodyLen := str.Len(body)
     response := str.Concat("HTTP/1.1 ", str.Concat(intToString(w.Status()), str.Concat(" ", str.Concat(text, "\r\n"))))
     response = str.Concat(response, str.Concat("Content-Length: ", str.Concat(intToString(bodyLen), "\r\n")))
+    contentType := w.headers["Content-Type"]
+    if contentType != "" {
+        response = str.Concat(response, str.Concat("Content-Type: ", str.Concat(contentType, "\r\n")))
+    }
     response = str.Concat(response, "Connection: close\r\n")
     response = str.Concat(response, "\r\n")
     response = str.Concat(response, body)
     return response
 }
 
-fn parseRequest(buf: string, bufLen: int) -> types.Request {
+fn parseRequest(buf: string, bufLen: int) -> Request {
     method := ""
     path := ""
     query := ""
@@ -113,22 +173,37 @@ fn parseRequest(buf: string, bufLen: int) -> types.Request {
         body = str.Substr(buf, headerOffset, bufLen - headerOffset)
     }
 
-    return types.Request{method: method, path: path, query: query, headers: headers, body: body}
+    return Request{method: method, path: path, query: query, headers: headers, body: body}
 }
 
-fn handleConnection(conn: net.Connection, r: *router.Router) {
+fn handleConnection(conn: net.Connection) {
     buf := libc.malloc(8192)
     total := conn.Read(buf, 8191)
     if total > 0 {
         buf[total] = 0
         req := parseRequest(buf, total)
-        w := types.ResponseWriter{status: 200, headers: make(map[string]string), body: ""}
-        r.ServeHTTP(req, &w)
+        w := ResponseWriter{status: 200, headers: make(map[string]string), body: ""}
+        routeRequest(req, &w)
         response := serializeResponse(&w)
         conn.Send(response)
     }
     conn.Close()
     libc.free(buf)
+}
+
+fn routeRequest(req: Request, w: *ResponseWriter) {
+    if req.method == "GET" && req.path == "/" {
+        indexHandler(req, w)
+    } else if req.method == "GET" && req.path == "/health" {
+        healthHandler(req, w)
+    } else if req.method == "GET" && str.StartsWith(req.path, "/static/") {
+        staticHandler(req, w)
+    } else if req.method == "POST" && req.path == "/api/chat" {
+        chatHandler(req, w)
+    } else {
+        w.WriteHeader(404)
+        w.Write("Not Found")
+    }
 }
 
 fn initLog(path: string) -> errors.Error {
@@ -173,8 +248,7 @@ fn loadModelOrFallback() -> (llm.Context, bool) {
 
 fn generateResponse(prompt: string) -> string {
     if hasModel {
-        m := model
-        response, err := m.Generate(prompt, 128)
+        response, err := (&model).Generate(prompt, 128)
         if err.message == "" {
             return response
         }
@@ -196,8 +270,8 @@ fn generateFallbackResponse(prompt: string) -> string {
     return "Interesting question! (Running in demo mode — place a GGUF model at models/model.gguf for real inference.)"
 }
 
-fn chatHandler(req: types.Request, w: *types.ResponseWriter) {
-    body, parseErr := req.ParseJSON()
+fn chatHandler(req: Request, w: *ResponseWriter) {
+    body, parseErr := json.Unmarshal(req.body)
     if parseErr.message != "" {
         w.WriteHeader(400)
         w.JSON(400, "{\"error\": \"Invalid JSON\"}")
@@ -221,11 +295,11 @@ fn chatHandler(req: types.Request, w: *types.ResponseWriter) {
     w.JSONValue(200, result)
 }
 
-fn healthHandler(req: types.Request, w: *types.ResponseWriter) {
+fn healthHandler(req: Request, w: *ResponseWriter) {
     w.JSON(200, "{\"status\":\"ok\"}")
 }
 
-fn serveStaticFile(path: string, w: *types.ResponseWriter) {
+fn serveStaticFile(path: string, w: *ResponseWriter) {
     content, err := fs.ReadAll(path)
     if err.message != "" {
         w.WriteHeader(404)
@@ -236,11 +310,11 @@ fn serveStaticFile(path: string, w: *types.ResponseWriter) {
     w.Write(content)
 }
 
-fn indexHandler(req: types.Request, w: *types.ResponseWriter) {
+fn indexHandler(req: Request, w: *ResponseWriter) {
     serveStaticFile("static/index.html", w)
 }
 
-fn staticHandler(req: types.Request, w: *types.ResponseWriter) {
+fn staticHandler(req: Request, w: *ResponseWriter) {
     path := req.Path()
     if str.StartsWith(path, "/static/") {
         path = str.Substr(path, 8, str.Len(path) - 8)
@@ -258,17 +332,13 @@ fn main() -> int {
 
     err := initLog("app.log")
     if err.message != "" {
-        print("Failed to create logger: {err.message}")
+        print("Failed to create logger: " + err.message)
         return 1
     }
 
-    model, hasModel = loadModelOrFallback()
-
-    r := router.NewRouter()
-    r.Get("/health", healthHandler)
-    r.Get("/", indexHandler)
-    r.Get("/static/*", staticHandler)
-    r.Post("/api/chat", chatHandler)
+    m, ok := loadModelOrFallback()
+    model = m
+    hasModel = ok
 
     logMessage("Server started on :8080")
     print("Server listening on http://0.0.0.0:8080")
@@ -278,7 +348,7 @@ fn main() -> int {
 
     listener, listenErr := net.Listen("0.0.0.0", 8080)
     if listenErr.message != "" {
-        print("Failed to listen: {listenErr.message}")
+        print("Failed to listen: " + listenErr.message)
         return 1
     }
 
@@ -287,6 +357,7 @@ fn main() -> int {
         if acceptErr.message != "" {
             continue
         }
-        handleConnection(conn, &r)
+        handleConnection(conn)
     }
+    return 0
 }
