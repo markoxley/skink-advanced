@@ -11,21 +11,21 @@ This example sketches a real-world Skink application that combines the four majo
 ## Type check
 
 ```bash
-SKINK_HOME=/path/to/skink-lang \
+SKINK_HOME=/path/to/skink \
   skink -check main.skink
 ```
 
 ## Build (native)
 
 ```bash
-SKINK_HOME=/path/to/skink-lang \
+SKINK_HOME=/path/to/skink \
   skink -o distributed main.skink
 ```
 
 ## Cross-compile for AArch64
 
 ```bash
-SKINK_HOME=/path/to/skink-lang \
+SKINK_HOME=/path/to/skink \
   skink -target aarch64-linux-gnu -o distributed-arm main.skink
 ```
 

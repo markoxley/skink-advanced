@@ -31,7 +31,7 @@ Ruleset lifecycle methods:
 ## Running
 
 ```bash
-SKINK_HOME=/path/to/skink-lang /path/to/skink -o ruleset_intro main.skink
+SKINK_HOME=/path/to/skink /path/to/skink -o ruleset_intro main.skink
 ./ruleset_intro
 ```
 

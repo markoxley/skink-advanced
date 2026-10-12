@@ -320,4 +320,4 @@ All projects in this repository are licensed under the Apache License 2.0, consi
 ## Additional Resources
 
 - [Skink Language Website](http://skink-lang.uk)
-- [Skink GitHub Repository](https://github.com/skink-lang/skink)
+- [Skink GitHub Repository](https://github.com/markoxley/skink)
