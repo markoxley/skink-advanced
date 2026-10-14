@@ -1,0 +1,115 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/api_test.skink
+// Purpose: In-process handler tests for the notes REST API — drives
+//          the real router through types.NewRequest/ServeHTTP against
+//          an in-memory SQLite database, exercising the full
+//          orm + json + tags stack with no socket required.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module api_test
+
+import "api"
+import "std/str"
+import "std/web/router"
+import "std/web/types"
+import "testing"
+
+// setup binds a fresh in-memory database and route table per test.
+fn setup() -> router.Router {
+    api.Init(":memory:")
+    return api.Router()
+}
+
+// request issues an in-process HTTP call through the router.
+fn request(r: *router.Router, method: string, path: string, body: string) -> types.ResponseWriter {
+    h := make(map[string]string)
+    req := types.NewRequest(method, path, "", h, body)
+    w := types.NewResponseWriter()
+    r.ServeHTTP(req, w)
+    return *w
+}
+
+// TestCreateGetList verifies POST then GET-by-id then GET-list.
+pub fn TestCreateGetList() {
+    r := setup()
+    w := request(&r, "POST", "/notes", `{"title":"first","body":"hello","pinned":true}`)
+    testing.AssertEqualInt(201, w.Status(), "create should return 201")
+    body := w.ResponseBody()
+    testing.AssertTrue(str.Contains(body, "first"), "create response should echo title")
+    testing.AssertTrue(str.Contains(body, "\"id\":1"), "create response should carry the generated id")
+
+    w2 := request(&r, "GET", "/notes/1", "")
+    testing.AssertEqualInt(200, w2.Status(), "get should return 200")
+    testing.AssertTrue(str.Contains(w2.ResponseBody(), "hello"), "get should return the stored body")
+
+    w3 := request(&r, "GET", "/notes", "")
+    testing.AssertEqualInt(200, w3.Status(), "list should return 200")
+    testing.AssertTrue(str.Contains(w3.ResponseBody(), "first"), "list should include the note")
+}
+
+// TestUpdate verifies PUT merges the JSON body over the stored row.
+pub fn TestUpdate() {
+    r := setup()
+    request(&r, "POST", "/notes", `{"title":"orig","body":"v1"}`)
+    w := request(&r, "PUT", "/notes/1", `{"body":"v2"}`)
+    testing.AssertEqualInt(200, w.Status(), "update should return 200")
+    w2 := request(&r, "GET", "/notes/1", "")
+    b := w2.ResponseBody()
+    testing.AssertTrue(str.Contains(b, "v2"), "update should store the new body")
+    testing.AssertTrue(str.Contains(b, "orig"), "absent keys should keep their stored values")
+}
+
+// TestDelete verifies DELETE removes the row.
+pub fn TestDelete() {
+    r := setup()
+    request(&r, "POST", "/notes", `{"title":"bye"}`)
+    w := request(&r, "DELETE", "/notes/1", "")
+    testing.AssertEqualInt(204, w.Status(), "delete should return 204")
+    w2 := request(&r, "GET", "/notes/1", "")
+    testing.AssertEqualInt(404, w2.Status(), "deleted row should 404")
+}
+
+// TestErrorPaths verifies malformed input and missing rows are
+// rejected with the right status codes.
+pub fn TestErrorPaths() {
+    r := setup()
+    w := request(&r, "POST", "/notes", "not json")
+    testing.AssertEqualInt(400, w.Status(), "malformed JSON should 400")
+    w2 := request(&r, "POST", "/notes", `{"body":"no title"}`)
+    testing.AssertEqualInt(400, w2.Status(), "missing title should 400")
+    w3 := request(&r, "GET", "/notes/abc", "")
+    testing.AssertEqualInt(400, w3.Status(), "non-numeric id should 400")
+    w4 := request(&r, "GET", "/notes/99", "")
+    testing.AssertEqualInt(404, w4.Status(), "missing row should 404")
+    w5 := request(&r, "GET", "/nope", "")
+    testing.AssertEqualInt(404, w5.Status(), "unknown route should 404")
+}
+
+// TestForgedID verifies a client-supplied id is never honoured —
+// the primary key is always generated.
+pub fn TestForgedID() {
+    r := setup()
+    request(&r, "POST", "/notes", `{"id":42,"title":"x"}`)
+    w := request(&r, "GET", "/notes/1", "")
+    testing.AssertEqualInt(200, w.Status(), "note should land under the generated id 1, not 42")
+    w2 := request(&r, "GET", "/notes/42", "")
+    testing.AssertEqualInt(404, w2.Status(), "no row should exist under the forged id")
+}

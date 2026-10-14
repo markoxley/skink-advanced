@@ -1,0 +1,185 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/api.skink
+// Purpose: REST CRUD API for notes — exercises the full persistence
+//          stack: [db]/[column]/[json] field tags, std/orm table
+//          mapping, json.MarshalStruct/UnmarshalInto, and the
+//          std/web router. Handlers are framework-shaped
+//          fn(Request, *ResponseWriter) so the same code is exercised
+//          by a live server and by in-process tests via ServeHTTP.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module api
+
+import "std/json"
+import "std/orm"
+import "std/reflect"
+import "std/errors"
+import "std/str"
+import "std/strconv"
+import "std/web/router"
+import "std/web/types"
+
+// Note is the API's resource. One struct serves two tag consumers:
+// [db]/[column] drive the orm table mapping, [json] drives the wire
+// format — no DTOs, no mapping layer.
+pub struct Note {
+    [db(pk,auto)]
+    id: int64
+
+    [column(name=title)] [json(name=title)]
+    title: string
+
+    body: string
+
+    pinned: bool
+}
+
+// Shared state — handlers have a fixed signature so the table binding
+// lives at module scope. Init must run before any request is served.
+var tbl orm.Table
+var noteType reflect.Type
+
+// Init opens the database at dsn (a path or ":memory:"), binds the
+// notes table, and creates it when absent.
+pub fn Init(dsn: string) -> errors.Error {
+    conn, err := orm.Open(dsn)
+    if err.message != "" {
+        return errors.New("api: cannot open database")
+    }
+    var n Note
+    noteType = reflect.TypeOf<Note>(n)
+    t, terr := orm.TableOf(conn, noteType)
+    if terr.message != "" {
+        return terr
+    }
+    tbl = t
+    return tbl.Create()
+}
+
+// Router builds the API route table.
+pub fn Router() -> router.Router {
+    r := router.NewRouter()
+    r.Get("/notes", listNotes)
+    r.Get("/notes/:id", getNote)
+    r.Post("/notes", createNote)
+    r.Put("/notes/:id", updateNote)
+    r.Delete("/notes/:id", deleteNote)
+    return r
+}
+
+// marshalNote serializes one note to its JSON object string.
+fn marshalNote(n: *Note) -> string {
+    s, _ := json.MarshalStruct(noteType, int64(n))
+    return s
+}
+
+// listNotes handles GET /notes — every row as a JSON array.
+fn listNotes(req: types.Request, w: *types.ResponseWriter) {
+    var parts []string
+    var n Note
+    rows := tbl.All()
+    for rows.Next(int64(&n)) {
+        parts = append(parts, marshalNote(&n))
+    }
+    w.JSON(200, str.Concat("[", str.Concat(str.Join(parts, ","), "]")))
+}
+
+// parseID extracts and validates the :id route parameter.
+fn parseID(req: types.Request) -> (int64, bool) {
+    return strconv.ParseInt64(req.URLParam("id"))
+}
+
+// getNote handles GET /notes/:id — one row or 404.
+fn getNote(req: types.Request, w: *types.ResponseWriter) {
+    id, ok := parseID(req)
+    if ok == false {
+        w.JSON(400, `{"error":"invalid id"}`)
+        return
+    }
+    var n Note
+    if tbl.Get(id, int64(&n)) == false {
+        w.JSON(404, `{"error":"not found"}`)
+        return
+    }
+    w.JSON(200, marshalNote(&n))
+}
+
+// createNote handles POST /notes — validates JSON, inserts, replies
+// 201 with the stored row (including its generated id).
+fn createNote(req: types.Request, w: *types.ResponseWriter) {
+    var n Note
+    err := json.UnmarshalInto(req.Body(), noteType, int64(&n))
+    if err.message != "" {
+        w.JSON(400, `{"error":"invalid note"}`)
+        return
+    }
+    if str.Len(str.Trim(n.title)) == 0 {
+        w.JSON(400, `{"error":"title required"}`)
+        return
+    }
+    // A client-supplied id is never trusted — the pk is generated.
+    n.id = int64(0)
+    if tbl.Insert(int64(&n)).message != "" {
+        w.JSON(500, `{"error":"insert failed"}`)
+        return
+    }
+    w.JSON(201, marshalNote(&n))
+}
+
+// updateNote handles PUT /notes/:id — loads the row, applies the JSON
+// body over it (absent keys keep their values), saves, replies 200.
+fn updateNote(req: types.Request, w: *types.ResponseWriter) {
+    id, ok := parseID(req)
+    if ok == false {
+        w.JSON(400, `{"error":"invalid id"}`)
+        return
+    }
+    var n Note
+    if tbl.Get(id, int64(&n)) == false {
+        w.JSON(404, `{"error":"not found"}`)
+        return
+    }
+    err := json.UnmarshalInto(req.Body(), noteType, int64(&n))
+    if err.message != "" {
+        w.JSON(400, `{"error":"invalid note"}`)
+        return
+    }
+    n.id = id
+    if tbl.Save(int64(&n)).message != "" {
+        w.JSON(500, `{"error":"update failed"}`)
+        return
+    }
+    w.JSON(200, marshalNote(&n))
+}
+
+// deleteNote handles DELETE /notes/:id — removes the row, replies 204.
+fn deleteNote(req: types.Request, w: *types.ResponseWriter) {
+    id, ok := parseID(req)
+    if ok == false {
+        w.JSON(400, `{"error":"invalid id"}`)
+        return
+    }
+    if tbl.Delete(id).message != "" {
+        w.JSON(500, `{"error":"delete failed"}`)
+        return
+    }
+    w.WriteHeader(204)
+}
