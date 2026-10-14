@@ -1,0 +1,98 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/scraper.skink
+// Purpose: Fetch/extract/persist core for the CLI web scraper —
+//          api.Get for the HTTP fetch, regex for extraction, and
+//          std/orm for optional --save persistence. Kept separate
+//          from main so every stage is unit-testable.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module scraper
+
+import "std/api"
+import "std/errors"
+import "std/orm"
+import "std/reflect"
+import "std/regex"
+import "std/str"
+import "std/strconv"
+
+// Hit is one scraped match — the [db] tags map it straight to the
+// hits table for --save persistence.
+pub struct Hit {
+    [db(pk,auto)]
+    id: int64
+    url: string
+    text: string
+}
+
+// FetchURL downloads url and returns the response body. Non-200
+// statuses and transport errors both surface as errors.
+pub fn FetchURL(url: string) -> (string, errors.Error) {
+    resp, err := api.Get(url)
+    if err.message != "" {
+        return "", err
+    }
+    if resp.Status() != 200 {
+        return "", errors.New(str.Concat("HTTP status ", strconv.Itoa(resp.Status())))
+    }
+    return resp.Body(), errors.None()
+}
+
+// Extract compiles pattern (POSIX ERE) and returns the text of every
+// match found in html. An invalid pattern is an error.
+pub fn Extract(pattern: string, html: string) -> ([]string, errors.Error) {
+    var out []string
+    re, err := regex.Compile(pattern)
+    if err.message != "" {
+        return out, err
+    }
+    matches := re.FindAll(html)
+    for m in matches {
+        out = append(out, m.Text)
+    }
+    return out, errors.None()
+}
+
+// SaveHits persists each extracted string as a Hit row in the hits
+// table of the SQLite database at dsn, created when absent.
+pub fn SaveHits(dsn: string, url: string, hits: []string) -> errors.Error {
+    conn, err := orm.Open(dsn)
+    if err.message != "" {
+        return errors.New("cannot open database")
+    }
+    var h Hit
+    tbl, terr := orm.TableOf(conn, reflect.TypeOf<Hit>(h))
+    if terr.message != "" {
+        return terr
+    }
+    if cerr := tbl.Create(); cerr.message != "" {
+        return cerr
+    }
+    for s in hits {
+        var row Hit
+        row.url = url
+        row.text = s
+        if ierr := tbl.Insert(int64(&row)); ierr.message != "" {
+            return ierr
+        }
+    }
+    return errors.None()
+}

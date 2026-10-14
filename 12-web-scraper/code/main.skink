@@ -1,0 +1,77 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/main.skink
+// Purpose: CLI entry point for the web scraper:
+//            scrape <url> <regex> [--save hits.db]
+//          Prints every match to stdout; --save also persists hits to
+//          SQLite via std/orm.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module main
+
+import "scraper"
+import "std/io"
+import "std/os"
+import "std/str"
+import "std/strconv"
+
+// usage prints the command synopsis.
+fn usage() {
+    io.PrintLine("usage: scrape <url> <regex-pattern> [--save hits.db]")
+}
+
+fn main() -> int {
+    args := os.Args()
+    if len(args) < 3 {
+        usage()
+        return 1
+    }
+    url := args[1]
+    pattern := args[2]
+    dsn := ""
+    if len(args) >= 5 && str.Equal(args[3], "--save") {
+        dsn = args[4]
+    }
+
+    body, ferr := scraper.FetchURL(url)
+    if ferr.message != "" {
+        io.PrintErrorLine(str.Concat("fetch failed: ", ferr.message))
+        return 1
+    }
+    hits, xerr := scraper.Extract(pattern, body)
+    if xerr.message != "" {
+        io.PrintErrorLine(str.Concat("bad pattern: ", xerr.message))
+        return 1
+    }
+    for h in hits {
+        io.PrintLine(h)
+    }
+    io.PrintLine(str.Concat(strconv.Itoa(len(hits)), " match(es)"))
+
+    if str.Len(dsn) > 0 {
+        serr := scraper.SaveHits(dsn, url, hits)
+        if serr.message != "" {
+            io.PrintErrorLine(str.Concat("save failed: ", serr.message))
+            return 1
+        }
+        io.PrintLine(str.Concat("saved to ", dsn))
+    }
+    return 0
+}

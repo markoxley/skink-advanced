@@ -1,0 +1,144 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/scraper_test.skink
+// Purpose: End-to-end scraper test — spawns a real std/web fixture
+//          server in-process, fetches it over real HTTP via api.Get,
+//          extracts links with regex, and persists hits to SQLite via
+//          orm. Exercises spawn routines + sockets + HTTP client +
+//          regex + orm in one path.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module scraper_test
+
+import "scraper"
+import "std/api"
+import "std/errors"
+import "std/orm"
+import "std/reflect"
+import "std/str"
+import "std/strconv"
+import "std/time"
+import "std/web/router"
+import "std/web/server"
+import "std/web/types"
+import "testing"
+
+const fixturePort = 18371
+
+// fixturePage serves a small HTML document with three links.
+fn fixturePage(req: types.Request, w: *types.ResponseWriter) {
+    w.HTML(200, `<html><body>
+<a href="/one">one</a>
+<a href="/two">two</a>
+<a href="/three">three</a>
+</body></html>`)
+}
+
+// runFixture starts the fixture server in a spawn routine and returns
+// the server handle for shutdown.
+fn runFixture() -> server.Server {
+    r := router.NewRouter()
+    r.Get("/", fixturePage)
+    s := server.NewServer(fixturePort, &r)
+    spawn s.ListenAndServe()
+    return s
+}
+
+// fetchWithRetry retries the fetch while the spawned accept loop
+// comes up (spawn is asynchronous).
+fn fetchWithRetry(url: string) -> (string, errors.Error) {
+    for i := 0; i < 40; i = i + 1 {
+        body, err := scraper.FetchURL(url)
+        if err.message == "" {
+            return body, errors.None()
+        }
+        time.SleepMs(50)
+    }
+    return "", errors.New("fixture server did not come up")
+}
+
+// TestScrapeEndToEnd verifies fetch -> extract -> save roundtrip
+// against a live fixture server.
+pub fn TestScrapeEndToEnd() {
+    s := runFixture()
+    url := str.Concat("http://127.0.0.1:", str.Concat(strconv.Itoa(fixturePort), "/"))
+    body, err := fetchWithRetry(url)
+    if err.message != "" {
+        Errorf("fetch should succeed against fixture")
+        s.Shutdown()
+        return
+    }
+    hits, xerr := scraper.Extract(`href="[^"]+"`, body)
+    if xerr.message != "" {
+        Errorf("extract should succeed")
+    }
+    if len(hits) != 3 {
+        Errorf("expected 3 link matches, got a different count")
+    }
+    found := false
+    for h in hits {
+        if str.Equal(h, `href="/two"`) {
+            found = true
+        }
+    }
+    if found == false {
+        Errorf("matches should include the /two link")
+    }
+
+    // Persist and read back through the orm layer.
+    dsn := "/tmp/scraper_test_hits.db"
+    serr := scraper.SaveHits(dsn, url, hits)
+    if serr.message != "" {
+        Errorf("SaveHits should succeed")
+    }
+    conn, _ := orm.Open(dsn)
+    var probe scraper.Hit
+    tbl, _ := orm.TableNamed(conn, reflect.TypeOf<scraper.Hit>(probe), "hits")
+    count := 0
+    var row scraper.Hit
+    rows := tbl.All()
+    for rows.Next(int64(&row)) {
+        count = count + 1
+        if str.Equal(row.url, url) == false {
+            Errorf("saved hit should carry the source url")
+        }
+    }
+    if count != len(hits) {
+        Errorf("all hits should persist to sqlite")
+    }
+    conn.Close()
+    s.Shutdown()
+}
+
+// TestExtractErrors verifies bad patterns error rather than panic.
+pub fn TestExtractErrors() {
+    _, err := scraper.Extract("[unclosed", "anything")
+    if err.message == "" {
+        Errorf("invalid regex should return an error")
+    }
+}
+
+// TestFetchError verifies a dead URL produces an error, not a crash.
+pub fn TestFetchError() {
+    _, err := scraper.FetchURL("http://127.0.0.1:1/unreachable")
+    if err.message == "" {
+        Errorf("unreachable URL should return an error")
+    }
+}
