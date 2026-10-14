@@ -1,0 +1,119 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/main.skink
+// Purpose: Entry point for the telemetry daemon. Supports both long-running
+//          HTTP server mode (:8090) and a self-contained `--soak` mode that
+//          drives sustained request load while profiling ARC memory and
+//          reference cycles.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module main
+
+import "daemon"
+import "std/io"
+import "std/os"
+import "std/strconv"
+import "std/web/router"
+import "std/web/server"
+import "std/web/types"
+
+extern fn Skink_rc_live_objects() -> int64
+extern fn Skink_rc_live_bytes() -> int64
+extern fn Skink_rc_peak_bytes() -> int64
+extern fn Skink_rc_detect_cycles() -> int64
+
+fn dispatch(r: *router.Router, method: string, path: string, body: string) -> int {
+    h := make(map[string]string)
+    req := types.NewRequest(method, path, "", h, body)
+    w := types.NewResponseWriter()
+    r.ServeHTTP(req, w)
+    return w.Status()
+}
+
+fn runSoak(iterations: int) -> int {
+    err := daemon.Init(":memory:", 50, 90)
+    if err.message != "" {
+        io.PrintErrorLine("soak init failed: " + err.message)
+        return 1
+    }
+    r := daemon.Router()
+    i := 0
+    var warmBytes int64 = 0
+    var midBytes int64 = 0
+    for i < iterations {
+        val := (i * 17) % 100
+        body := `{"source":"edge-gw","metric":"cpu_pct","value":` + strconv.Itoa(val) + `}`
+        if dispatch(&r, "POST", "/ingest", body) != 201 {
+            io.PrintErrorLine("unexpected ingest status")
+            return 1
+        }
+        if i % 10 == 0 {
+            if dispatch(&r, "GET", "/health", "") != 200 {
+                io.PrintErrorLine("unexpected health status")
+                return 1
+            }
+        }
+        if i == 100 {
+            warmBytes = Skink_rc_live_bytes()
+        }
+        if i == iterations / 2 {
+            midBytes = Skink_rc_live_bytes()
+        }
+        i = i + 1
+    }
+    endBytes := Skink_rc_live_bytes()
+    endObjs := Skink_rc_live_objects()
+    peakBytes := Skink_rc_peak_bytes()
+    cycles := Skink_rc_detect_cycles()
+    io.PrintLine("soak complete: iterations=" + strconv.Itoa(iterations))
+    io.PrintLine("  warmup_live_bytes=" + strconv.Itoa(int(warmBytes)) +
+        " mid_live_bytes=" + strconv.Itoa(int(midBytes)) +
+        " end_live_bytes=" + strconv.Itoa(int(endBytes)))
+    io.PrintLine("  end_live_objects=" + strconv.Itoa(int(endObjs)) +
+        " peak_bytes=" + strconv.Itoa(int(peakBytes)) +
+        " cycles=" + strconv.Itoa(int(cycles)))
+    if cycles != int64(0) {
+        return 2
+    }
+    return 0
+}
+
+fn main() -> int {
+    args := os.Args()
+    if len(args) > 1 && args[1] == "--soak" {
+        iters := 1000
+        if len(args) > 2 {
+            n, ok := strconv.ParseInt(args[2])
+            if ok && n > 0 {
+                iters = n
+            }
+        }
+        return runSoak(iters)
+    }
+    err := daemon.Init("telemetry.db", 100, 90)
+    if err.message != "" {
+        io.PrintErrorLine("cannot open telemetry.db")
+        return 1
+    }
+    r := daemon.Router()
+    io.PrintLine("telemetry daemon listening on :8090")
+    server.Serve(":8090", r)
+    return 0
+}

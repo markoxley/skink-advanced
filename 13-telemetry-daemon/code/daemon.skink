@@ -1,0 +1,224 @@
+// Copyright 2026 Mark Oxley. All rights reserved.
+//
+// Project: Skink — A self-hosted, statically-typed programming language
+//          targeting LLVM IR, designed for systems programming with
+//          modern ergonomics and a Go-inspired syntax.
+//
+// File:    code/daemon.skink
+// Purpose: Long-running telemetry ingestion and alerting daemon.
+//          Exercises sustained HTTP routing (std/web), SQLite persistence
+//          with bounded retention (std/orm), struct serialization
+//          (std/json), prefix/interior slice views under the fat-slice
+//          header ABI (#114), and live ARC heap/cycle introspection.
+// Author:  Mark Oxley
+// Created: 2026
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module daemon
+
+import "std/json"
+import "std/orm"
+import "std/reflect"
+import "std/errors"
+import "std/str"
+import "std/strconv"
+import "std/web/router"
+import "std/web/types"
+
+extern fn Skink_rc_live_objects() -> int64
+extern fn Skink_rc_live_bytes() -> int64
+extern fn Skink_rc_peak_bytes() -> int64
+extern fn Skink_rc_detect_cycles() -> int64
+
+// MetricSample represents one ingested telemetry reading stored via std/orm
+// and serialized via std/json.
+pub struct MetricSample {
+    [db(pk,auto)]
+    id: int64
+
+    [column(name=source)] [json(name=source)]
+    source: string
+
+    [column(name=metric)] [json(name=metric)]
+    metric: string
+
+    value: int
+
+    status: string
+}
+
+// HealthReport summarizes daemon state and ARC runtime memory counters.
+pub struct HealthReport {
+    samples:      int
+    alerts:       int
+    live_objects: int64
+    live_bytes:   int64
+    peak_bytes:   int64
+    cycles:       int64
+}
+
+var tbl orm.Table
+var sampleType reflect.Type
+var healthType reflect.Type
+var maxRetention: int = 50
+var alertThreshold: int = 90
+
+// Init opens the telemetry SQLite database, binds the MetricSample table,
+// and configures the retention cap and alert threshold.
+pub fn Init(dsn: string, retention: int, threshold: int) -> errors.Error {
+    conn, err := orm.Open(dsn)
+    if err.message != "" {
+        return errors.New("daemon: cannot open database")
+    }
+    var s MetricSample
+    sampleType = reflect.TypeOf<MetricSample>(s)
+    var h HealthReport
+    healthType = reflect.TypeOf<HealthReport>(h)
+    t, terr := orm.TableOf(conn, sampleType)
+    if terr.message != "" {
+        return terr
+    }
+    tbl = t
+    if retention > 0 {
+        maxRetention = retention
+    }
+    if threshold > 0 {
+        alertThreshold = threshold
+    }
+    return tbl.Create()
+}
+
+// Router builds the HTTP route table for the telemetry daemon.
+pub fn Router() -> router.Router {
+    r := router.NewRouter()
+    r.Post("/ingest", ingestSample)
+    r.Get("/samples", listSamples)
+    r.Get("/alerts", listAlerts)
+    r.Get("/health", getHealth)
+    r.Delete("/samples/:id", deleteSample)
+    return r
+}
+
+fn marshalSample(s: *MetricSample) -> string {
+    out, _ := json.MarshalStruct(sampleType, int64(s))
+    return out
+}
+
+// enforceRetention bounds the SQLite table to maxRetention rows by taking a
+// leading-edge slice view ids[0:dropCount] of the oldest row IDs and deleting
+// them — exercising prefix slice views on every overflow ingest.
+fn enforceRetention() {
+    var ids []int64
+    var s MetricSample
+    rows := tbl.All()
+    for rows.Next(int64(&s)) {
+        ids = append(ids, s.id)
+    }
+    total := len(ids)
+    if total <= maxRetention {
+        return
+    }
+    dropCount := total - maxRetention
+    evictView := ids[0:dropCount]
+    for id in evictView {
+        tbl.Delete(id)
+    }
+}
+
+// ingestSample handles POST /ingest.
+fn ingestSample(req: types.Request, w: *types.ResponseWriter) {
+    var s MetricSample
+    err := json.UnmarshalInto(req.Body(), sampleType, int64(&s))
+    if err.message != "" {
+        w.JSON(400, `{"error":"invalid sample"}`)
+        return
+    }
+    if str.Len(str.Trim(s.source)) == 0 || str.Len(str.Trim(s.metric)) == 0 {
+        w.JSON(400, `{"error":"source and metric required"}`)
+        return
+    }
+    s.id = int64(0)
+    if s.value >= alertThreshold {
+        s.status = "critical"
+    } else {
+        s.status = "ok"
+    }
+    if tbl.Insert(int64(&s)).message != "" {
+        w.JSON(500, `{"error":"insert failed"}`)
+        return
+    }
+    enforceRetention()
+    w.JSON(201, marshalSample(&s))
+}
+
+// listSamples handles GET /samples.
+fn listSamples(req: types.Request, w: *types.ResponseWriter) {
+    var parts []string
+    var s MetricSample
+    rows := tbl.All()
+    for rows.Next(int64(&s)) {
+        parts = append(parts, marshalSample(&s))
+    }
+    w.JSON(200, str.Concat("[", str.Concat(str.Join(parts, ","), "]")))
+}
+
+// listAlerts handles GET /alerts — returns only critical samples.
+fn listAlerts(req: types.Request, w: *types.ResponseWriter) {
+    var parts []string
+    var s MetricSample
+    rows := tbl.Where("status = ?", []string{"critical"})
+    for rows.Next(int64(&s)) {
+        parts = append(parts, marshalSample(&s))
+    }
+    w.JSON(200, str.Concat("[", str.Concat(str.Join(parts, ","), "]")))
+}
+
+// getHealth handles GET /health — reports row counts and live ARC memory stats.
+fn getHealth(req: types.Request, w: *types.ResponseWriter) {
+    var s MetricSample
+    total := 0
+    rows := tbl.All()
+    for rows.Next(int64(&s)) {
+        total = total + 1
+    }
+    alerts := 0
+    arows := tbl.Where("status = ?", []string{"critical"})
+    for arows.Next(int64(&s)) {
+        alerts = alerts + 1
+    }
+    rep := HealthReport{
+        samples:      total,
+        alerts:       alerts,
+        live_objects: Skink_rc_live_objects(),
+        live_bytes:   Skink_rc_live_bytes(),
+        peak_bytes:   Skink_rc_peak_bytes(),
+        cycles:       Skink_rc_detect_cycles()
+    }
+    body, _ := json.MarshalStruct(healthType, int64(&rep))
+    w.JSON(200, body)
+}
+
+// deleteSample handles DELETE /samples/:id.
+fn deleteSample(req: types.Request, w: *types.ResponseWriter) {
+    id, ok := strconv.ParseInt64(req.URLParam("id"))
+    if ok == false {
+        w.JSON(400, `{"error":"invalid id"}`)
+        return
+    }
+    if tbl.Delete(id).message != "" {
+        w.JSON(500, `{"error":"delete failed"}`)
+        return
+    }
+    w.WriteHeader(204)
+}
