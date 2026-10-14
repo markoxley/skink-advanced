@@ -30,10 +30,10 @@ module scraper_test
 import "scraper"
 import "std/api"
 import "std/errors"
+import "std/fs"
 import "std/orm"
 import "std/reflect"
 import "std/str"
-import "std/strconv"
 import "std/time"
 import "std/web/router"
 import "std/web/server"
@@ -78,7 +78,7 @@ fn fetchWithRetry(url: string) -> (string, errors.Error) {
 // against a live fixture server.
 pub fn TestScrapeEndToEnd() {
     s := runFixture()
-    url := str.Concat("http://127.0.0.1:", str.Concat(strconv.Itoa(fixturePort), "/"))
+    url := str.Concat("http://127.0.0.1:", str.Concat(intToStr(fixturePort), "/"))
     body, err := fetchWithRetry(url)
     if err.message != "" {
         Errorf("fetch should succeed against fixture")
@@ -102,8 +102,11 @@ pub fn TestScrapeEndToEnd() {
         Errorf("matches should include the /two link")
     }
 
-    // Persist and read back through the orm layer.
+    // Persist and read back through the orm layer. Remove any leftover
+    // database first — the path is fixed, so a previous run's rows would
+    // inflate the count and make the test order-dependent.
     dsn := "/tmp/scraper_test_hits.db"
+    fs.Remove(dsn)
     serr := scraper.SaveHits(dsn, url, hits)
     if serr.message != "" {
         Errorf("SaveHits should succeed")
@@ -141,4 +144,20 @@ pub fn TestFetchError() {
     if err.message == "" {
         Errorf("unreachable URL should return an error")
     }
+}
+
+// intToStr is a tiny local itoa to avoid a strconv import for one use.
+fn intToStr(n: int) -> string {
+    digits := "0123456789"
+    if n == 0 {
+        return "0"
+    }
+    out := ""
+    v := n
+    for v > 0 {
+        d := v % 10
+        out = str.Concat(str.Substr(digits, d, 1), out)
+        v = v / 10
+    }
+    return out
 }
